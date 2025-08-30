@@ -222,37 +222,48 @@ def load_telco_data(uploaded_file=None):
         try:
             df = pd.read_csv(uploaded_file)
             print(f"[{datetime.now().strftime('%H:%M:%S')}] Loaded uploaded dataset: {df.shape}")
+            df = engineer_features(df)
+            return df
         except Exception as e:
             raise FileNotFoundError(f"Failed to read uploaded file: {e}")
-    else:
-        # Check both current working directory and the directory where this script lives
+
+    # Otherwise, prefer Kaggle as the default source on Hugging Face Spaces
+    # This will attempt to use Kaggle API (with secrets KAGGLE_USERNAME/KAGGLE_KEY) or CLI.
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] No upload provided — attempting Kaggle download as default source")
+    success, msg = kaggle_download_telco()
+    if success:
+        # Ensure we load the CSV from the most likely locations
         possible_paths = [
             os.path.abspath(TELCO_CSV),
             os.path.join(os.path.dirname(__file__), TELCO_CSV),
         ]
-
         found_path = None
         for p in possible_paths:
             if os.path.exists(p):
                 found_path = p
                 break
+        if found_path:
+            df = pd.read_csv(found_path)
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Loaded dataset from Kaggle download at: {found_path} shape={df.shape}")
+            df = engineer_features(df)
+            return df
+        else:
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Kaggle reported success but CSV not found in expected locations: {possible_paths}. Message: {msg}")
 
-        if not found_path:
-            # Try Kaggle download as a last resort
-            success, msg = kaggle_download_telco()
-            if not success:
-                raise FileNotFoundError(f"Dataset not found: {TELCO_CSV}. {msg}")
-            # After download attempt, check again in common locations
-            for p in possible_paths:
-                if os.path.exists(p):
-                    found_path = p
-                    break
+    # Fallback: try to load CSV bundled with the repo (useful if network/download fails)
+    possible_paths = [
+        os.path.abspath(TELCO_CSV),
+        os.path.join(os.path.dirname(__file__), TELCO_CSV),
+    ]
+    for p in possible_paths:
+        if os.path.exists(p):
+            df = pd.read_csv(p)
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Loaded dataset from local repo path: {p} shape={df.shape}")
+            df = engineer_features(df)
+            return df
 
-        if not found_path:
-            raise FileNotFoundError(f"Dataset still not found after download attempt: checked {possible_paths}")
-
-        df = pd.read_csv(found_path)
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] Loaded dataset from: {found_path} shape={df.shape}")
+    # If we reach here, nothing worked
+    raise FileNotFoundError(f"Dataset not found: {TELCO_CSV}. Kaggle attempt message: {msg}")
 
     # Advanced feature engineering (best-effort - keep generic)
     df = engineer_features(df)
