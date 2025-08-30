@@ -1949,6 +1949,10 @@ def create_gradio_interface():
     run_log = gr.Textbox(label="Run log", lines=10, interactive=False)
     progress_bar = gr.HTML("<div class='custom-progress'><span id='progress' class='bar' style='width:0%'>0%</span></div>")
 
+    # Early status outputs so handler registrations can reference them safely
+    status_text = gr.Markdown("Status: Ready")
+    time_estimate = gr.Markdown("Time: Calculating...")
+
     # Output placeholders used by training and visualization sections. Creating
     # them early ensures `.click()` registrations can safely reference them
     # while still inside the active Blocks context.
@@ -2050,6 +2054,10 @@ def create_gradio_interface():
                 dataset_preview = gr.DataFrame(headers=None, interactive=False)
                 # Handlers registered later after all components are created
                 download_log = gr.Textbox(label="Download log", lines=6)
+                # Register preview/download handlers immediately to avoid
+                # calling .click() later when variables may be out-of-scope.
+                preview_btn.click(fn=preview_dataset_handler, inputs=[file_input], outputs=[dataset_preview])
+                download_btn.click(fn=download_dataset_handler, inputs=None, outputs=[download_log, dataset_preview])
         
         # Controls
         gr.Markdown("## Training")
@@ -2072,13 +2080,8 @@ def create_gradio_interface():
         )
 
 
-        # Status
-        status_text = gr.Markdown("Status: Ready")
-        time_estimate = gr.Markdown("Time: Calculating...")
-        # Run log (scrollable) to surface terminal output from training
-        run_log = gr.Textbox(label="Run log", lines=10, interactive=False)
-        # Lightweight visual progress indicator (will be updated with HTML)
-        progress_bar = gr.HTML("<div class='custom-progress'><span id='progress' class='bar' style='width:0%'>0%</span></div>")
+    # Run log (scrollable) to surface terminal output from training
+    # (placeholders created earlier)
 
         # Results
         gr.Markdown("## Results")
@@ -2110,6 +2113,8 @@ def create_gradio_interface():
             with gr.Column():
                 shap_bar = gr.HTML("<div id='shap-area'></div>")
                 btn_shap = gr.Button("Compute SHAP")
+                # Register SHAP compute handler immediately
+                btn_shap.click(fn=compute_shap_handler, outputs=[shap_summary, shap_bar])
 
     # Preview and download handlers are registered earlier next to their components.
 
