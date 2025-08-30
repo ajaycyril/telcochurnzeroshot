@@ -1713,6 +1713,8 @@ def create_gradio_interface():
                 ensemble_size = gr.Number(value=3, label="Ensemble Size (2-5)")
                 feature_selection = gr.Checkbox(label="Feature Selection")
                 preview_btn = gr.Button("Preview Dataset")
+                download_btn = gr.Button("Download dataset (Kaggle)")
+                download_log = gr.Textbox(label="Download log", lines=6)
                 mode_toggle = gr.Radio(choices=["Fast", "Full"], value="Fast", label="Mode")
                 file_input = gr.File(file_count="single", file_types=['.csv'], label="Upload CSV (optional)")
         
@@ -1879,6 +1881,25 @@ Cross-Validation:
 
         # Register event handlers at the Blocks scope (must be inside the with-gr.Blocks context)
         preview_btn.click(fn=preview_dataset, inputs=[file_input], outputs=[dataset_preview])
+        
+        def download_dataset():
+            # Run the kaggle downloader and capture the message
+            try:
+                success, msg = kaggle_download_telco()
+                if success:
+                    # return log and a small preview
+                    try:
+                        df = pd.read_csv(TELCO_CSV)
+                        preview = df.head(20)
+                    except Exception:
+                        preview = pd.DataFrame()
+                    return msg, gr.DataFrame.update(value=preview)
+                else:
+                    return msg, gr.DataFrame.update(value=pd.DataFrame())
+            except Exception as e:
+                return f"Download error: {e}", gr.DataFrame.update(value=pd.DataFrame())
+
+        download_btn.click(fn=download_dataset, inputs=None, outputs=[download_log, dataset_preview])
 
         # Connect event handlers (registered inside Blocks context)
         btn_train.click(

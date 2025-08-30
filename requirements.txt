@@ -14,5 +14,8 @@ catboost>=1.2.0
 scipy>=1.7.0
 seaborn>=0.11.0
 
+# Kaggle API - ensure Spaces builds install kaggle to allow automatic dataset download
+kaggle>=1.5.0
+
 # Kaggle API for dataset downloadss
 kaggle>=1.5.0
