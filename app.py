@@ -1895,6 +1895,8 @@ def create_gradio_interface():
                 cv_folds = gr.Number(value=3, label="CV Folds (3-10)")
                 ensemble_size = gr.Number(value=3, label="Ensemble Size (2-5)")
                 feature_selection = gr.Checkbox(label="Feature Selection")
+                mode_toggle = gr.Radio(choices=["Fast", "Full"], value="Fast", label="Mode")
+                file_input = gr.File(file_count="single", file_types=['.csv'], label="Upload CSV (optional)")
                 preview_btn = gr.Button("Preview Dataset")
                 download_btn = gr.Button("Download dataset (Kaggle)")
                 # Register lightweight handlers immediately after button creation to
@@ -1902,8 +1904,6 @@ def create_gradio_interface():
                 preview_btn.click(fn=preview_dataset_handler, inputs=[file_input], outputs=[dataset_preview])
                 download_btn.click(fn=download_dataset_handler, inputs=None, outputs=[download_log, dataset_preview])
                 download_log = gr.Textbox(label="Download log", lines=6)
-                mode_toggle = gr.Radio(choices=["Fast", "Full"], value="Fast", label="Mode")
-                file_input = gr.File(file_count="single", file_types=['.csv'], label="Upload CSV (optional)")
         
         # Controls
         gr.Markdown("## Training")
