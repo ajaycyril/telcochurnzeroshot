@@ -13,7 +13,18 @@ APP_BUILD_ID = datetime.now().strftime('%Y%m%d_%H%M%S')
 # Constants
 TELCO_KAGGLE_REF = "blastchar/telco-customer-churn"
 TELCO_ZIP = "telco-customer-churn.zip"
+import os
+import sys
+import subprocess
+import hashlib
+from datetime import datetime
+
+# CSV location relative to this module
 TELCO_CSV = "WA_Fn-UseC_-Telco-Customer-Churn.csv"
+
+def generate_hash(input_string):
+    """Generate a hash from an input string for use as a unique ID"""
+    return hashlib.md5(str(input_string).encode()).hexdigest()[:8]
 
 def ensure_optional_libs(allow_install):
     available = {"xgboost": False, "lightgbm": False, "catboost": False}

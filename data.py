@@ -6,7 +6,23 @@ from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder, RobustScaler
 from sklearn.impute import SimpleImputer
 
-from .utils import TELCO_CSV, kaggle_download_telco
+from utils import TELCO_CSV, kaggle_download_telco
+
+def load_telco_data():
+    """Load the Telco customer churn dataset from the local file or download it if not available."""
+    import os
+    import pandas as pd
+    
+    if os.path.exists(TELCO_CSV):
+        print(f"Loading Telco data from {TELCO_CSV}")
+        df = pd.read_csv(TELCO_CSV)
+    else:
+        print(f"Downloading Telco dataset...")
+        kaggle_download_telco()
+        df = pd.read_csv(TELCO_CSV)
+        
+    # Apply feature engineering
+    return engineer_features(df)
 
 
 def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
