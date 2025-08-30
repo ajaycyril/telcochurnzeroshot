@@ -18,6 +18,10 @@ from datetime import datetime
 import warnings
 warnings.filterwarnings("ignore")
 
+# Build marker to help verify the deployed Space has reloaded this file
+APP_BUILD_ID = datetime.now().strftime('%Y%m%d_%H%M%S')
+print(f"[APP_BUILD] Build ID: {APP_BUILD_ID}")
+
 import numpy as np
 import pandas as pd
 import matplotlib
