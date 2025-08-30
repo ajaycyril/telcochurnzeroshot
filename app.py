@@ -1761,18 +1761,60 @@ def create_gradio_interface():
     print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Entering create_gradio_interface()")
     with gr.Blocks() as demo:
         # Lightweight CSS polish for demo visuals
-        gr.HTML("""
-        <style>
-        /* Buttons */
-        .gr-button { border-radius: 10px !important; background: linear-gradient(90deg,#4f46e5,#7c3aed) !important; color: white !important; border: none !important; box-shadow: 0 6px 18px rgba(79,70,229,0.12); }
-        .gr-button[aria-pressed="true"] { opacity: 0.95; }
-        /* Progress bar */
-        .custom-progress { width:100%; background:#f3f4f6; border-radius:8px; padding:6px; }
-        .custom-progress .bar { display:block; height:28px; border-radius:6px; background:linear-gradient(90deg,#4f46e5,#06b6d4); color:white; text-align:center; line-height:28px; font-weight:600; }
-        /* Run log monospace */
-        textarea.gr-text-input { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', monospace !important; }
-        </style>
-        """)
+                gr.HTML("""
+                <style>
+                :root{
+                    --bg:#0f172a; /* deep navy */
+                    --card:#0b1220;
+                    --muted:#94a3b8;
+                    --accent1:#7c3aed; /* purple */
+                    --accent2:#06b6d4; /* teal */
+                    --glass: rgba(255,255,255,0.03);
+                }
+                /* Page background and container */
+                .gradio-container { background: linear-gradient(180deg, #071029 0%, #07172a 60%); padding:28px; font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, 'Helvetica Neue', Arial; color: #e6eef8 }
+                .gr-block { max-width:1200px; margin: 0 auto; }
+
+                /* Card look for columns and major panels */
+                .card { background: linear-gradient(180deg,var(--card), rgba(11,18,32,0.6)); border-radius: 12px; padding: 16px; box-shadow: 0 8px 30px rgba(2,6,23,0.6); border: 1px solid rgba(255,255,255,0.03); }
+                .panel { margin-bottom: 16px; }
+
+                /* Buttons */
+                .gr-button { border-radius: 10px !important; background: linear-gradient(90deg,var(--accent1),#4f46e5) !important; color: white !important; border: none !important; padding:10px 14px !important; font-weight:600 !important; box-shadow: 0 10px 30px rgba(79,70,229,0.12); transition: transform .12s ease, box-shadow .12s ease; }
+                .gr-button:hover { transform: translateY(-2px); box-shadow: 0 16px 36px rgba(79,70,229,0.18); }
+
+                /* Headings and markdown */
+                .gr-markdown h1, .gr-markdown h2 { color: #ffffff; text-shadow: 0 2px 10px rgba(0,0,0,0.6); }
+                .gr-markdown p, .gr-markdown li { color: var(--muted); }
+
+                /* Dataframe and images */
+                .gr-dataframe, .gr-image, .gr-markdown, .gr-textbox { background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.015)); border-radius: 10px; padding: 8px; }
+                table { border-collapse: collapse; }
+                table tr:hover { background: rgba(255,255,255,0.02); }
+
+                /* Progress bar */
+                .custom-progress { width:100%; background:rgba(255,255,255,0.03); border-radius:8px; padding:6px; }
+                .custom-progress .bar { display:block; height:30px; border-radius:6px; background:linear-gradient(90deg,var(--accent1),var(--accent2)); color:white; text-align:center; line-height:30px; font-weight:700; }
+
+                /* Run log monospace */
+                textarea.gr-text-input { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', monospace !important; color:#e6eef8 !important; background:transparent !important; }
+
+                /* SHAP and visuals sizing */
+                img { max-width: 100% !important; height: auto !important; object-fit: contain !important; }
+                #shap-area img, .gr-image img { max-height: 520px !important; width: auto !important; }
+
+                /* Metric badges in markdown (rendered as inline code-like badges) */
+                .gr-markdown code.metric-badge { background: linear-gradient(90deg,var(--accent1),var(--accent2)); color:white; padding:6px 10px; border-radius:8px; font-weight:700; }
+
+                /* Small interactions */
+                .gr-row { gap: 14px; }
+                .gr-column { gap: 12px; }
+                .card .gr-button { width:100%; }
+
+                /* Accent boxes for best model */
+                .best-model { border-left: 4px solid var(--accent1); padding-left:12px; }
+                </style>
+                """)
 
         # Header
         gr.Markdown("# Enterprise ML Pipeline - Telco Churn Prediction")
@@ -1877,6 +1919,14 @@ def create_gradio_interface():
 
         # Results
         gr.Markdown("## Results")
+        # Plain-English guidance for non-technical viewers
+        gr.Markdown(
+            "### Quick read: What you just saw (plain English)\n"
+            "- Scorecard: a ranked table of models and their core metrics (accuracy, F1, AUC).\n"
+            "- Best model: the single model with the best held-out test AUC.\n"
+            "- ROC / Confusion: visual tools to understand tradeoffs between false positives and false negatives.\n"
+            "- Key takeaways: concise metrics and the top features that most influenced model predictions."
+        )
         with gr.Row():
             with gr.Column():
                 gr.Markdown("### Performance")
@@ -1893,9 +1943,10 @@ def create_gradio_interface():
         gr.Markdown("## SHAP Analysis")
         with gr.Row():
             with gr.Column():
-                shap_summary = gr.Image(type="filepath")
+                # Constrain SHAP images to a wrapper so CSS can control sizing
+                shap_summary = gr.HTML("<div id='shap-area'></div>")
             with gr.Column():
-                shap_bar = gr.Image(type="filepath")
+                shap_bar = gr.HTML("<div id='shap-area'></div>")
                 btn_shap = gr.Button("Compute SHAP")
 
         # Event handlers: define handlers inside the active Blocks scope so `.click()`
@@ -1997,8 +2048,19 @@ Test Performance:
 Cross-Validation:
 - CV AUC: {best_row['CV AUC Mean']:.3f} ± {best_row['CV AUC Std']:.3f}
 """
-                # key takeaways
-                key_md = f"### Key takeaways\n- Best model: {best_row['Model']}\n- Test AUC: {best_row['Test AUC']:.3f}\n- Test Accuracy: {best_row['Test Accuracy']:.3f}\n"
+                # key takeaways: improved visual layout
+                key_md = "### Key takeaways\n"
+                # small metric table
+                key_md += (
+                    "| Metric | Value |\n"
+                    "|---:|:---:|\n"
+                    f"| Test Accuracy | {best_row['Test Accuracy']:.3f} |\n"
+                    f"| Test F1 | {best_row['Test F1']:.3f} |\n"
+                    f"| Test AUC | {best_row['Test AUC']:.3f} |\n"
+                    f"| Precision | {best_row['Test Precision']:.3f} |\n"
+                    f"| Recall | {best_row['Test Recall']:.3f} |\n"
+                )
+                key_md += "\n**Model:** {}\n\n".format(best_row['Model'])
                 try:
                     best_pipe = result["trained"].get(result["best_name"]) if result.get("best_name") else None
                     final_est = _get_final_estimator(best_pipe) if best_pipe is not None else None
@@ -2008,7 +2070,21 @@ Cross-Validation:
                         if len(importances) == len(fnames):
                             idx = list(np.argsort(importances)[::-1][:6])
                             top = [f"{fnames[i]} ({importances[i]:.3f})" for i in idx]
-                            key_md += "- Top features: " + ", ".join(top) + "\n"
+                            key_md += "**Top features:**\n\n"
+                            for t in top:
+                                key_md += f"- {t}\n"
+                            # Plain english summary using top feature names
+                            try:
+                                top_names = [t.split(' (')[0] for t in top]
+                                plain_summary = (
+                                    f"**Plain English summary:** The best model ({best_row['Model']}) achieved "
+                                    f"{best_row['Test Accuracy']:.1%} accuracy and AUC {best_row['Test AUC']:.3f}. "
+                                    f"The features most responsible for the predictions were: {', '.join(top_names)}. "
+                                    "These features are likely driving the model's decisions and are good starting points for further analysis."
+                                )
+                                key_md += "\n" + plain_summary + "\n"
+                            except Exception:
+                                pass
                 except Exception:
                     pass
 
