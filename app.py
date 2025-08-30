@@ -1909,6 +1909,20 @@ def create_gradio_interface():
     """
     print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Entering create_gradio_interface()")
     with gr.Blocks() as demo:
+        # Create commonly used placeholders first so handlers can reference
+        # them safely even when registered immediately for older Gradio.
+        dataset_preview = gr.DataFrame(headers=None, interactive=False)
+        download_log = gr.Textbox(label="Download log", lines=6)
+
+        # Create file input and preview/download buttons immediately so
+        # older Gradio versions see the .click() bindings while the
+        # Blocks context is freshly active.
+        file_input = gr.File(file_count="single", file_types=['.csv'], label="Upload CSV (optional)")
+        preview_btn = gr.Button("Preview Dataset")
+        download_btn = gr.Button("Download dataset (Kaggle)")
+        preview_btn.click(fn=preview_dataset_handler, inputs=[file_input], outputs=[dataset_preview])
+        download_btn.click(fn=download_dataset_handler, inputs=None, outputs=[download_log, dataset_preview])
+
         # Harmonized world-class theme (light cards on dark background)
         gr.HTML("""
     <style>
@@ -1944,8 +1958,8 @@ def create_gradio_interface():
     """)
 
     # Reserve commonly referenced components early so handlers can reference them safely
-    dataset_preview = gr.DataFrame(headers=None, interactive=False)
-    download_log = gr.Textbox(label="Download log", lines=6)
+    # (dataset_preview and download_log were already created above at the top
+    # of the Blocks context when registering handlers for older Gradio.)
     run_log = gr.Textbox(label="Run log", lines=10, interactive=False)
     progress_bar = gr.HTML("<div class='custom-progress'><span id='progress' class='bar' style='width:0%'>0%</span></div>")
 
