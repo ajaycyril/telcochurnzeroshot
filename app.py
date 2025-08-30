@@ -1954,6 +1954,14 @@ def create_gradio_interface():
     status_text = gr.Markdown("Status: Ready")
     time_estimate = gr.Markdown("Time: Calculating...")
 
+    # File upload and quick preview/download controls — create early and
+    # register handlers immediately to satisfy older Gradio semantics
+    file_input = gr.File(file_count="single", file_types=['.csv'], label="Upload CSV (optional)")
+    preview_btn = gr.Button("Preview Dataset")
+    download_btn = gr.Button("Download dataset (Kaggle)")
+    preview_btn.click(fn=preview_dataset_handler, inputs=[file_input], outputs=[dataset_preview])
+    download_btn.click(fn=download_dataset_handler, inputs=None, outputs=[download_log, dataset_preview])
+
     # Output placeholders used by training and visualization sections. Creating
     # them early ensures `.click()` registrations can safely reference them
     # while still inside the active Blocks context.
@@ -2048,15 +2056,8 @@ def create_gradio_interface():
                 ensemble_size = gr.Number(value=3, label="Ensemble Size (2-5)")
                 feature_selection = gr.Checkbox(label="Feature Selection")
                 mode_toggle = gr.Radio(choices=["Fast", "Full"], value="Fast", label="Mode")
-                file_input = gr.File(file_count="single", file_types=['.csv'], label="Upload CSV (optional)")
-                preview_btn = gr.Button("Preview Dataset")
-                download_btn = gr.Button("Download dataset (Kaggle)")
-                # Preview area and download_log are created earlier so handlers
-                # can reference them safely without shadowing the names.
-                # Register preview/download handlers immediately to avoid
-                # calling .click() later when variables may be out-of-scope.
-                preview_btn.click(fn=preview_dataset_handler, inputs=[file_input], outputs=[dataset_preview])
-                download_btn.click(fn=download_dataset_handler, inputs=None, outputs=[download_log, dataset_preview])
+                # file_input, preview_btn and download_btn are created earlier
+                # (top of Blocks) and their handlers are already registered.
         
         # Controls
         gr.Markdown("## Training")
