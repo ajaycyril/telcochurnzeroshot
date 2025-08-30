@@ -1771,6 +1771,138 @@ def download_dataset_handler():
     except Exception as e:
         return f"Download error: {e}", pd.DataFrame()
 
+
+def train_streaming_handler(cv_folds, ensemble_size, feature_selection, lr_selected, rf_selected, gb_selected, xgb_selected, cat_selected, mode, uploaded_file=None):
+    """Module-level streaming training generator compatible with Gradio Blocks.
+
+    Mirrors previous nested `train_models` generator but stores results in the
+    module-level TRAINED_RESULT so other handlers can consume it.
+    """
+    global TRAINED_RESULT
+    # Set defaults
+    cv_folds = 3 if cv_folds is None else cv_folds
+    ensemble_size = 3 if ensemble_size is None else ensemble_size
+    lr_selected = bool(lr_selected)
+    rf_selected = bool(rf_selected)
+    gb_selected = bool(gb_selected)
+    xgb_selected = bool(xgb_selected)
+    cat_selected = bool(cat_selected)
+
+    selected_models = []
+    if lr_selected: selected_models.append("Logistic Regression")
+    if rf_selected: selected_models.append("Random Forest")
+    if gb_selected: selected_models.append("Gradient Boosting")
+    if xgb_selected: selected_models.append("XGBoost")
+    if cat_selected: selected_models.append("CatBoost")
+
+    if not selected_models:
+        yield (pd.DataFrame(), "Error: No models selected", None, None, "Status: No models selected", "Estimated Time: 0s", "", "", "<div></div>")
+        return
+
+    # Rough estimate
+    est = 0
+    est += 0 if not lr_selected else 40
+    est += 0 if not rf_selected else 72
+    est += 0 if not gb_selected else 81
+    est += 0 if not xgb_selected else 243
+    est += 0 if not cat_selected else 108
+    time_update = f"Estimated Time: {est//60}m {est%60}s"
+
+    fast_mode = (mode == "Fast")
+
+    # Initial UI pulse
+    yield (pd.DataFrame(), "Preparing data and environment...", None, None, f"Status: Preparing - fast={fast_mode}", time_update, "", "", "<div style='width:100%;background:#eef2ff;border-radius:8px;padding:6px'><div style='width:5%;background:#4f46e5;color:white;padding:6px;border-radius:6px;text-align:center;'>5%</div></div>")
+
+    # Log capture
+    log_lines = []
+    lock = threading.Lock()
+    orig_print = builtins.print
+
+    def proxy_print(*args, **kwargs):
+        try:
+            text = " ".join(str(a) for a in args)
+        except Exception:
+            text = str(args)
+        try:
+            orig_print(*args, **kwargs)
+        except Exception:
+            pass
+        with lock:
+            log_lines.append(text)
+
+    result_container = {}
+
+    def worker():
+        try:
+            builtins.print = proxy_print
+            res = _call_train(selected_models, allow_install=True, fast=fast_mode, uploaded_file=uploaded_file)
+            result_container['result'] = res
+        except Exception as e:
+            result_container['result'] = {"success": False, "error": str(e)}
+        finally:
+            builtins.print = orig_print
+
+    th = threading.Thread(target=worker)
+    th.start()
+
+    # Stream logs while worker runs
+    while th.is_alive():
+        time.sleep(0.7)
+        with lock:
+            log_text = "\n".join(log_lines[-200:])
+        prog = min(95, max(5, int(min(100, len(log_lines) / 5))))
+        prog_html = f"<div style='width:100%;background:#eef2ff;border-radius:8px;padding:6px'><div style='width:{prog}%;background:#4f46e5;color:white;padding:6px;border-radius:6px;text-align:center;'>{prog}%</div></div>"
+        yield (pd.DataFrame(), "Training in progress...", None, None, "Status: Training...", time_update, log_text, "", prog_html)
+
+    # Finished
+    result = result_container.get('result', {"success": False, "error": "No result"})
+    final_log = "\n".join(log_lines)
+    if result.get('success'):
+        TRAINED_RESULT = result
+        try:
+            best_row = result["scorecard"].iloc[0]
+            best_summary = f"""
+### Best Model: {best_row['Model']}
+
+Test Performance:
+- Accuracy: {best_row['Test Accuracy']:.3f}
+- F1 Score: {best_row['Test F1']:.3f}
+- AUC: {best_row['Test AUC']:.3f}
+- Precision: {best_row['Test Precision']:.3f}
+- Recall: {best_row['Test Recall']:.3f}
+
+Cross-Validation:
+- CV AUC: {best_row['CV AUC Mean']:.3f} ± {best_row['CV AUC Std']:.3f}
+"""
+        except Exception:
+            best_summary = "Training completed"
+
+        key_md = "### Key takeaways\n"
+        try:
+            best_pipe = result["trained"].get(result.get("best_name")) if result.get("best_name") else None
+            final_est = _get_final_estimator(best_pipe) if best_pipe is not None else None
+            if final_est is not None and hasattr(final_est, 'feature_importances_'):
+                importances = getattr(final_est, 'feature_importances_')
+                fnames = result.get('feature_names', [])
+                if len(importances) == len(fnames):
+                    idx = list(np.argsort(importances)[::-1][:6])
+                    top = [f"{fnames[i]} ({importances[i]:.3f})" for i in idx]
+                    key_md += "**Top features:**\n\n"
+                    for t in top:
+                        key_md += f"- {t}\n"
+        except Exception:
+            pass
+
+        prog_html = "<div style='width:100%;background:#eef2ff;border-radius:8px;padding:6px'><div style='width:100%;background:#4f46e5;color:white;padding:6px;border-radius:6px;text-align:center;'>100%</div></div>"
+        yield (result["scorecard"], best_summary, result.get("roc_path"), result.get("conf_path"), "Status: Training completed successfully! ✅", time_update, final_log, key_md, prog_html)
+        return
+    else:
+        err = result.get('error', 'Unknown error')
+        final_log = final_log + "\nERROR: " + str(err)
+        prog_html = "<div style='width:100%;background:#fee2e2;border-radius:8px;padding:6px'><div style='width:100%;background:#ef4444;color:white;padding:6px;border-radius:6px;text-align:center;'>ERROR</div></div>"
+        yield (pd.DataFrame(), f"Error: {err}", None, None, f"Status: Training failed ❌ - {err}", "Estimated Time: Error occurred", final_log, "", prog_html)
+        return
+
 def create_gradio_interface():
     """
     Create an absolutely minimal, 100% compatible Gradio interface for older versions.
@@ -1907,10 +2039,7 @@ def create_gradio_interface():
                 download_btn = gr.Button("Download dataset (Kaggle)")
                 # Preview area must exist before registering handlers that reference it
                 dataset_preview = gr.DataFrame(headers=None, interactive=False)
-                # Register lightweight handlers immediately after button creation to
-                # ensure the Blocks context is active when .click() is called (older Gradio compatibility)
-                preview_btn.click(fn=preview_dataset_handler, inputs=[file_input], outputs=[dataset_preview])
-                download_btn.click(fn=download_dataset_handler, inputs=None, outputs=[download_log, dataset_preview])
+                # Handlers registered later after all components are created
                 download_log = gr.Textbox(label="Download log", lines=6)
         
         # Controls
@@ -1960,205 +2089,27 @@ def create_gradio_interface():
                 shap_bar = gr.HTML("<div id='shap-area'></div>")
                 btn_shap = gr.Button("Compute SHAP")
 
-        # Event handlers: define handlers inside the active Blocks scope so `.click()`
-        # calls occur while the gradio Blocks context is active (required by older gradio versions).
-        def train_models(cv_folds, ensemble_size, feature_selection, lr_selected, rf_selected, gb_selected, xgb_selected, cat_selected, mode, uploaded_file=None):
-            """Stream training logs and progress to the frontend using a background thread."""
-            # Set defaults
-            cv_folds = 3 if cv_folds is None else cv_folds
-            ensemble_size = 3 if ensemble_size is None else ensemble_size
-            lr_selected = bool(lr_selected)
-            rf_selected = bool(rf_selected)
-            gb_selected = bool(gb_selected)
-            xgb_selected = bool(xgb_selected)
-            cat_selected = bool(cat_selected)
-
-            selected_models = []
-            if lr_selected: selected_models.append("Logistic Regression")
-            if rf_selected: selected_models.append("Random Forest")
-            if gb_selected: selected_models.append("Gradient Boosting")
-            if xgb_selected: selected_models.append("XGBoost")
-            if cat_selected: selected_models.append("CatBoost")
-
-            if not selected_models:
-                yield (gr.DataFrame(), "Error: No models selected", None, None, "Status: No models selected", "Estimated Time: 0s", "", "", "<div></div>")
-                return
-
-            # Estimate rough time for display
-            est = 0
-            est += 0 if not lr_selected else 40
-            est += 0 if not rf_selected else 72
-            est += 0 if not gb_selected else 81
-            est += 0 if not xgb_selected else 243
-            est += 0 if not cat_selected else 108
-            time_update = f"Estimated Time: {est//60}m {est%60}s"
-
-            fast_mode = (mode == "Fast")
-
-            # Initial UI pulse
-            yield (gr.DataFrame(), "Preparing data and environment...", None, None, f"Status: Preparing - fast={fast_mode}", time_update, "", "", "<div style='width:100%;background:#eef2ff;border-radius:8px;padding:6px'><div style='width:5%;background:#4f46e5;color:white;padding:6px;border-radius:6px;text-align:center;'>5%</div></div>")
-
-            # Log capture
-            log_lines = []
-            lock = threading.Lock()
-            orig_print = builtins.print
-
-            def proxy_print(*args, **kwargs):
-                try:
-                    text = " ".join(str(a) for a in args)
-                except Exception:
-                    text = str(args)
-                try:
-                    orig_print(*args, **kwargs)
-                except Exception:
-                    pass
-                with lock:
-                    log_lines.append(text)
-
-            result_container = {}
-
-            def worker():
-                try:
-                    builtins.print = proxy_print
-                    res = _call_train(selected_models, allow_install=True, fast=fast_mode, uploaded_file=uploaded_file)
-                    result_container['result'] = res
-                except Exception as e:
-                    result_container['result'] = {"success": False, "error": str(e)}
-                finally:
-                    builtins.print = orig_print
-
-            th = threading.Thread(target=worker)
-            th.start()
-
-            # While training runs, stream logs and basic progress simulation
-            while th.is_alive():
-                time.sleep(0.7)
-                with lock:
-                    log_text = "\n".join(log_lines[-200:])
-                # crude progress heuristic: fraction of log lines (not accurate but gives motion)
-                prog = min(95, max(5, int(min(100, len(log_lines) / 5))))
-                prog_html = f"<div style='width:100%;background:#eef2ff;border-radius:8px;padding:6px'><div style='width:{prog}%;background:#4f46e5;color:white;padding:6px;border-radius:6px;text-align:center;'>{prog}%</div></div>"
-                yield (gr.DataFrame(), "Training in progress...", None, None, "Status: Training...", time_update, log_text, "", prog_html)
-
-            # finished
-            result = result_container.get('result', {"success": False, "error": "No result"})
-            final_log = "\n".join(log_lines)
-            if result.get('success'):
-                demo.trained_result = result
-                best_row = result["scorecard"].iloc[0]
-                best_summary = f"""
-### Best Model: {best_row['Model']}
-
-Test Performance:
-- Accuracy: {best_row['Test Accuracy']:.3f}
-- F1 Score: {best_row['Test F1']:.3f}
-- AUC: {best_row['Test AUC']:.3f}
-- Precision: {best_row['Test Precision']:.3f}
-- Recall: {best_row['Test Recall']:.3f}
-
-Cross-Validation:
-- CV AUC: {best_row['CV AUC Mean']:.3f} ± {best_row['CV AUC Std']:.3f}
-"""
-                # key takeaways: improved visual layout
-                key_md = "### Key takeaways\n"
-                # small metric table
-                key_md += (
-                    "| Metric | Value |\n"
-                    "|---:|:---:|\n"
-                    f"| Test Accuracy | {best_row['Test Accuracy']:.3f} |\n"
-                    f"| Test F1 | {best_row['Test F1']:.3f} |\n"
-                    f"| Test AUC | {best_row['Test AUC']:.3f} |\n"
-                    f"| Precision | {best_row['Test Precision']:.3f} |\n"
-                    f"| Recall | {best_row['Test Recall']:.3f} |\n"
-                )
-                key_md += "\n**Model:** {}\n\n".format(best_row['Model'])
-                try:
-                    best_pipe = result["trained"].get(result["best_name"]) if result.get("best_name") else None
-                    final_est = _get_final_estimator(best_pipe) if best_pipe is not None else None
-                    if final_est is not None and hasattr(final_est, 'feature_importances_'):
-                        importances = getattr(final_est, 'feature_importances_')
-                        fnames = result.get('feature_names', [])
-                        if len(importances) == len(fnames):
-                            idx = list(np.argsort(importances)[::-1][:6])
-                            top = [f"{fnames[i]} ({importances[i]:.3f})" for i in idx]
-                            key_md += "**Top features:**\n\n"
-                            for t in top:
-                                key_md += f"- {t}\n"
-                            # Plain english summary using top feature names
-                            try:
-                                top_names = [t.split(' (')[0] for t in top]
-                                plain_summary = (
-                                    f"**Plain English summary:** The best model ({best_row['Model']}) achieved "
-                                    f"{best_row['Test Accuracy']:.1%} accuracy and AUC {best_row['Test AUC']:.3f}. "
-                                    f"The features most responsible for the predictions were: {', '.join(top_names)}. "
-                                    "These features are likely driving the model's decisions and are good starting points for further analysis."
-                                )
-                                key_md += "\n" + plain_summary + "\n"
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
-
-                prog_html = "<div style='width:100%;background:#eef2ff;border-radius:8px;padding:6px'><div style='width:100%;background:#4f46e5;color:white;padding:6px;border-radius:6px;text-align:center;'>100%</div></div>"
-                yield (result["scorecard"], best_summary, result.get("roc_path"), result.get("conf_path"), "Status: Training completed successfully! ✅", time_update, final_log, key_md, prog_html)
-                return
-            else:
-                err = result.get('error', 'Unknown error')
-                final_log = final_log + "\nERROR: " + str(err)
-                prog_html = "<div style='width:100%;background:#fee2e2;border-radius:8px;padding:6px'><div style='width:100%;background:#ef4444;color:white;padding:6px;border-radius:6px;text-align:center;'>ERROR</div></div>"
-                yield (gr.DataFrame(), f"Error: {err}", None, None, f"Status: Training failed ❌ - {err}", "Estimated Time: Error occurred", final_log, "", prog_html)
-                return
-
-        def test_ui():
-            """Test function to verify UI is working."""
-            return "UI is working! Status updated successfully.", "Test completed"
-
-        def compute_shap():
-            if hasattr(demo, 'trained_result'):
-                result = demo.trained_result
-                shap_paths = compute_shap_images(
-                    result["trained"][result["best_name"]],
-                    result["preprocessor"],
-                    result["X_sample"],
-                    result["feature_names"]
-                )
-
-                if len(shap_paths) >= 2:
-                    return shap_paths[0], shap_paths[1]
-                else:
-                    return None, None
-            else:
-                return None, None
-
-        def preview_dataset(uploaded_file=None):
-            try:
-                if uploaded_file:
-                    path = uploaded_file.name if hasattr(uploaded_file, 'name') else uploaded_file
-                    df = pd.read_csv(path)
-                else:
-                    df = pd.read_csv(TELCO_CSV)
-                # show first 50 rows
-                return df.head(50)
-            except Exception:
-                return pd.DataFrame()
-
-        # Note: actual download handler is defined later; replace the placeholder when invoked.
-        # Connect event handlers close to their controls to avoid Blocks-context timing issues
+        # Register event handlers inside the active Blocks context using module-level
+        # functions to ensure compatibility with older Gradio versions used by Spaces.
         btn_train.click(
-            fn=train_models,
+            fn=train_streaming_handler,
             inputs=[cv_folds, ensemble_size, feature_selection, lr_checkbox, rf_checkbox, gb_checkbox, xgb_checkbox, cat_checkbox, mode_toggle, file_input],
             outputs=[scorecard_output, best_model_output, roc_output, conf_output, status_text, time_estimate, run_log, key_takeaways, progress_bar]
         )
 
         btn_test.click(
-            fn=test_ui,
+            fn=test_ui_handler,
             outputs=[status_text, time_estimate]
         )
 
         btn_shap.click(
-            fn=compute_shap,
+            fn=compute_shap_handler,
             outputs=[shap_summary, shap_bar]
         )
+
+        # Register preview and download handlers after component creation
+        preview_btn.click(fn=preview_dataset_handler, inputs=[file_input], outputs=[dataset_preview])
+        download_btn.click(fn=download_dataset_handler, inputs=None, outputs=[download_log, dataset_preview])
 
         # Quick demo flow – concise and professional guidance for live demos
         with gr.Row():
