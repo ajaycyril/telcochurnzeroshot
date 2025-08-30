@@ -1952,11 +1952,11 @@ def create_gradio_interface():
     # Output placeholders used by training and visualization sections. Creating
     # them early ensures `.click()` registrations can safely reference them
     # while still inside the active Blocks context.
-    scorecard_output = gr.DataFrame()
-    best_model_output = gr.Markdown()
-    key_takeaways = gr.Markdown()
-    roc_output = gr.Image(type="filepath")
-    conf_output = gr.Image(type="filepath")
+    out_scorecard = gr.DataFrame()
+    out_best_model = gr.Markdown()
+    out_key_takeaways = gr.Markdown()
+    out_roc = gr.Image(type="filepath")
+    out_conf = gr.Image(type="filepath")
 
     # Wrap top header in a white card for contrast
     gr.HTML("<div class='main-card'>")
@@ -2063,7 +2063,7 @@ def create_gradio_interface():
         btn_train.click(
             fn=train_streaming_handler,
             inputs=[cv_folds, ensemble_size, feature_selection, lr_checkbox, rf_checkbox, gb_checkbox, xgb_checkbox, cat_checkbox, mode_toggle, file_input],
-            outputs=[scorecard_output, best_model_output, roc_output, conf_output, status_text, time_estimate, run_log, key_takeaways, progress_bar]
+            outputs=[out_scorecard, out_best_model, out_roc, out_conf, status_text, time_estimate, run_log, out_key_takeaways, progress_bar]
         )
 
         btn_test.click(
