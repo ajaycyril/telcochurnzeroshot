@@ -1696,6 +1696,31 @@ def create_gradio_interface():
                     "- After training, explore ROC and confusion plots to understand class tradeoffs; use SHAP to justify individual predictions for stakeholders."
                 )
                 
+                gr.Markdown("---")
+                gr.Markdown("## Getting started (step-by-step)")
+                gr.Markdown(
+                    "Follow these steps to run the full ML flow and reproduce strong results on the Telco dataset:\n\n"
+                    "1. Data source: By default, the app attempts to download the canonical Telco dataset from Kaggle. If you prefer, upload your CSV using 'Upload CSV'.\n"
+                    "2. Preview / EDA: Click 'Preview Dataset' to inspect the top rows and ensure data types are correct.\n"
+                    "3. Feature engineering: The pipeline constructs domain features (tenure groups, charge ratios, service counts). Inspect features locally if you wish to modify.\n"
+                    "4. Mode selection: Use 'Fast' for quick iterations (safe grids and skipped heavy boosters). Switch to 'Full' for thorough tuning and including XGBoost/CatBoost.\n"
+                    "5. Model selection: Select one or more models; combining models yields a more robust ensemble.\n"
+                    "6. Train: Click 'Start Training' and follow the Status messages to watch progress.\n"
+                    "7. Evaluate & explain: Inspect scorecard, ROC, confusion matrix; click 'Compute SHAP' for explainability.\n"
+                    "8. Persist & export: Models are saved under the `/models` folder; download artifacts for production deployment."
+                )
+
+                gr.Markdown("## How to reach production-quality accuracy")
+                gr.Markdown(
+                    "Recommended path to maximize performance while remaining auditable:\n\n"
+                    "- Start in `Fast` mode to validate the pipeline.\n"
+                    "- Switch to `Full` mode and enable XGBoost/CatBoost in an environment where those packages are available.\n"
+                    "- Increase CV folds (5-10), expand search spaces, and consider RandomizedSearch/Optuna for faster coverage.\n"
+                    "- Use targeted feature selection (SelectKBest or model importances) to remove noisy columns.\n"
+                    "- Calibrate predicted probabilities (Platt or isotonic) for better thresholding.\n"
+                    "- Ensemble top performers and validate on a holdout set for robustness.\n"
+                )
+                
             with gr.Column():
                 gr.Markdown("## Configuration")
                 
