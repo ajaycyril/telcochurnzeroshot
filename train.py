@@ -1,9 +1,15 @@
-import os
-import joblib
-from datetime import datetime
-from .data import engineer_features, get_preprocessor, split_xy
-from .modeling import get_tuned_models_selected if False else None
+import importlib
+
 
 def train_selected_models_only(selected_models, allow_install=False, fast=False, uploaded_file=None):
-    # This is a lightweight wrapper kept as a placeholder; the full logic lives in app.py until migrated fully.
-    raise NotImplementedError("train_selected_models_only is moved in the refactor; use the original app.py implementation or re-run migration step.")
+    """Delegate to the legacy app implementation while refactoring progresses.
+
+    This avoids duplicating large orchestration logic and keeps the public API
+    stable for the UI and tests.
+    """
+    try:
+        app = importlib.import_module("app")
+        return app.train_selected_models_only(selected_models, allow_install=allow_install, fast=fast, uploaded_file=uploaded_file)
+    except Exception:
+        # If import fails for some reason, raise a clear error
+        raise
