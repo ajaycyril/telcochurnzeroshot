@@ -2047,6 +2047,22 @@ def create_gradio_interface():
         btn_train = gr.Button("Start Training")
         btn_test = gr.Button("Test UI")
 
+        # Register event handlers immediately after creating the controls to
+        # ensure compatibility with older Gradio versions where `.click()` must
+        # be called while the Blocks context is active and shortly after the
+        # component is created.
+        btn_train.click(
+            fn=train_streaming_handler,
+            inputs=[cv_folds, ensemble_size, feature_selection, lr_checkbox, rf_checkbox, gb_checkbox, xgb_checkbox, cat_checkbox, mode_toggle, file_input],
+            outputs=[scorecard_output, best_model_output, roc_output, conf_output, status_text, time_estimate, run_log, key_takeaways, progress_bar]
+        )
+
+        btn_test.click(
+            fn=test_ui_handler,
+            outputs=[status_text, time_estimate]
+        )
+
+
         # Status
         status_text = gr.Markdown("Status: Ready")
         time_estimate = gr.Markdown("Time: Calculating...")
@@ -2089,27 +2105,7 @@ def create_gradio_interface():
                 shap_bar = gr.HTML("<div id='shap-area'></div>")
                 btn_shap = gr.Button("Compute SHAP")
 
-        # Register event handlers inside the active Blocks context using module-level
-        # functions to ensure compatibility with older Gradio versions used by Spaces.
-        btn_train.click(
-            fn=train_streaming_handler,
-            inputs=[cv_folds, ensemble_size, feature_selection, lr_checkbox, rf_checkbox, gb_checkbox, xgb_checkbox, cat_checkbox, mode_toggle, file_input],
-            outputs=[scorecard_output, best_model_output, roc_output, conf_output, status_text, time_estimate, run_log, key_takeaways, progress_bar]
-        )
-
-        btn_test.click(
-            fn=test_ui_handler,
-            outputs=[status_text, time_estimate]
-        )
-
-        btn_shap.click(
-            fn=compute_shap_handler,
-            outputs=[shap_summary, shap_bar]
-        )
-
-        # Register preview and download handlers after component creation
-        preview_btn.click(fn=preview_dataset_handler, inputs=[file_input], outputs=[dataset_preview])
-        download_btn.click(fn=download_dataset_handler, inputs=None, outputs=[download_log, dataset_preview])
+    # Preview and download handlers are registered earlier next to their components.
 
         # Quick demo flow – concise and professional guidance for live demos
         with gr.Row():
