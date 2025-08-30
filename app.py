@@ -1761,60 +1761,60 @@ def create_gradio_interface():
     print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Entering create_gradio_interface()")
     with gr.Blocks() as demo:
         # Lightweight CSS polish for demo visuals
-                gr.HTML("""
-                <style>
-                :root{
-                    --bg:#0f172a; /* deep navy */
-                    --card:#0b1220;
-                    --muted:#94a3b8;
-                    --accent1:#7c3aed; /* purple */
-                    --accent2:#06b6d4; /* teal */
-                    --glass: rgba(255,255,255,0.03);
-                }
-                /* Page background and container */
-                .gradio-container { background: linear-gradient(180deg, #071029 0%, #07172a 60%); padding:28px; font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, 'Helvetica Neue', Arial; color: #e6eef8 }
-                .gr-block { max-width:1200px; margin: 0 auto; }
+        gr.HTML("""
+        <style>
+        :root{
+            --bg:#0f172a; /* deep navy */
+            --card:#0b1220;
+            --muted:#94a3b8;
+            --accent1:#7c3aed; /* purple */
+            --accent2:#06b6d4; /* teal */
+            --glass: rgba(255,255,255,0.03);
+        }
+        /* Page background and container */
+        .gradio-container { background: linear-gradient(180deg, #071029 0%, #07172a 60%); padding:28px; font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, 'Helvetica Neue', Arial; color: #e6eef8 }
+        .gr-block { max-width:1200px; margin: 0 auto; }
 
-                /* Card look for columns and major panels */
-                .card { background: linear-gradient(180deg,var(--card), rgba(11,18,32,0.6)); border-radius: 12px; padding: 16px; box-shadow: 0 8px 30px rgba(2,6,23,0.6); border: 1px solid rgba(255,255,255,0.03); }
-                .panel { margin-bottom: 16px; }
+        /* Card look for columns and major panels */
+        .card { background: linear-gradient(180deg,var(--card), rgba(11,18,32,0.6)); border-radius: 12px; padding: 16px; box-shadow: 0 8px 30px rgba(2,6,23,0.6); border: 1px solid rgba(255,255,255,0.03); }
+        .panel { margin-bottom: 16px; }
 
-                /* Buttons */
-                .gr-button { border-radius: 10px !important; background: linear-gradient(90deg,var(--accent1),#4f46e5) !important; color: white !important; border: none !important; padding:10px 14px !important; font-weight:600 !important; box-shadow: 0 10px 30px rgba(79,70,229,0.12); transition: transform .12s ease, box-shadow .12s ease; }
-                .gr-button:hover { transform: translateY(-2px); box-shadow: 0 16px 36px rgba(79,70,229,0.18); }
+        /* Buttons */
+        .gr-button { border-radius: 10px !important; background: linear-gradient(90deg,var(--accent1),#4f46e5) !important; color: white !important; border: none !important; padding:10px 14px !important; font-weight:600 !important; box-shadow: 0 10px 30px rgba(79,70,229,0.12); transition: transform .12s ease, box-shadow .12s ease; }
+        .gr-button:hover { transform: translateY(-2px); box-shadow: 0 16px 36px rgba(79,70,229,0.18); }
 
-                /* Headings and markdown */
-                .gr-markdown h1, .gr-markdown h2 { color: #ffffff; text-shadow: 0 2px 10px rgba(0,0,0,0.6); }
-                .gr-markdown p, .gr-markdown li { color: var(--muted); }
+        /* Headings and markdown */
+        .gr-markdown h1, .gr-markdown h2 { color: #ffffff; text-shadow: 0 2px 10px rgba(0,0,0,0.6); }
+        .gr-markdown p, .gr-markdown li { color: var(--muted); }
 
-                /* Dataframe and images */
-                .gr-dataframe, .gr-image, .gr-markdown, .gr-textbox { background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.015)); border-radius: 10px; padding: 8px; }
-                table { border-collapse: collapse; }
-                table tr:hover { background: rgba(255,255,255,0.02); }
+        /* Dataframe and images */
+        .gr-dataframe, .gr-image, .gr-markdown, .gr-textbox { background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.015)); border-radius: 10px; padding: 8px; }
+        table { border-collapse: collapse; }
+        table tr:hover { background: rgba(255,255,255,0.02); }
 
-                /* Progress bar */
-                .custom-progress { width:100%; background:rgba(255,255,255,0.03); border-radius:8px; padding:6px; }
-                .custom-progress .bar { display:block; height:30px; border-radius:6px; background:linear-gradient(90deg,var(--accent1),var(--accent2)); color:white; text-align:center; line-height:30px; font-weight:700; }
+        /* Progress bar */
+        .custom-progress { width:100%; background:rgba(255,255,255,0.03); border-radius:8px; padding:6px; }
+        .custom-progress .bar { display:block; height:30px; border-radius:6px; background:linear-gradient(90deg,var(--accent1),var(--accent2)); color:white; text-align:center; line-height:30px; font-weight:700; }
 
-                /* Run log monospace */
-                textarea.gr-text-input { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', monospace !important; color:#e6eef8 !important; background:transparent !important; }
+        /* Run log monospace */
+        textarea.gr-text-input { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', monospace !important; color:#e6eef8 !important; background:transparent !important; }
 
-                /* SHAP and visuals sizing */
-                img { max-width: 100% !important; height: auto !important; object-fit: contain !important; }
-                #shap-area img, .gr-image img { max-height: 520px !important; width: auto !important; }
+        /* SHAP and visuals sizing */
+        img { max-width: 100% !important; height: auto !important; object-fit: contain !important; }
+        #shap-area img, .gr-image img { max-height: 520px !important; width: auto !important; }
 
-                /* Metric badges in markdown (rendered as inline code-like badges) */
-                .gr-markdown code.metric-badge { background: linear-gradient(90deg,var(--accent1),var(--accent2)); color:white; padding:6px 10px; border-radius:8px; font-weight:700; }
+        /* Metric badges in markdown (rendered as inline code-like badges) */
+        .gr-markdown code.metric-badge { background: linear-gradient(90deg,var(--accent1),var(--accent2)); color:white; padding:6px 10px; border-radius:8px; font-weight:700; }
 
-                /* Small interactions */
-                .gr-row { gap: 14px; }
-                .gr-column { gap: 12px; }
-                .card .gr-button { width:100%; }
+        /* Small interactions */
+        .gr-row { gap: 14px; }
+        .gr-column { gap: 12px; }
+        .card .gr-button { width:100%; }
 
-                /* Accent boxes for best model */
-                .best-model { border-left: 4px solid var(--accent1); padding-left:12px; }
-                </style>
-                """)
+        /* Accent boxes for best model */
+        .best-model { border-left: 4px solid var(--accent1); padding-left:12px; }
+        </style>
+        """)
 
         # Header
         gr.Markdown("# Enterprise ML Pipeline - Telco Churn Prediction")
