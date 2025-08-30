@@ -1811,6 +1811,12 @@ def create_gradio_interface():
     </style>
     """)
 
+    # Reserve commonly referenced components early so handlers can reference them safely
+    dataset_preview = gr.DataFrame(headers=None, interactive=False)
+    download_log = gr.Textbox(label="Download log", lines=6)
+    run_log = gr.Textbox(label="Run log", lines=10, interactive=False)
+    progress_bar = gr.HTML("<div class='custom-progress'><span id='progress' class='bar' style='width:0%'>0%</span></div>")
+
     # Wrap top header in a white card for contrast
     gr.HTML("<div class='main-card'>")
 
@@ -1899,6 +1905,8 @@ def create_gradio_interface():
                 file_input = gr.File(file_count="single", file_types=['.csv'], label="Upload CSV (optional)")
                 preview_btn = gr.Button("Preview Dataset")
                 download_btn = gr.Button("Download dataset (Kaggle)")
+                # Preview area must exist before registering handlers that reference it
+                dataset_preview = gr.DataFrame(headers=None, interactive=False)
                 # Register lightweight handlers immediately after button creation to
                 # ensure the Blocks context is active when .click() is called (older Gradio compatibility)
                 preview_btn.click(fn=preview_dataset_handler, inputs=[file_input], outputs=[dataset_preview])
@@ -1913,7 +1921,6 @@ def create_gradio_interface():
         # Status
         status_text = gr.Markdown("Status: Ready")
         time_estimate = gr.Markdown("Time: Calculating...")
-        dataset_preview = gr.DataFrame(headers=None, interactive=False)
         # Run log (scrollable) to surface terminal output from training
         run_log = gr.Textbox(label="Run log", lines=10, interactive=False)
         # Lightweight visual progress indicator (will be updated with HTML)
