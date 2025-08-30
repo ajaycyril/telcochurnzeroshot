@@ -1949,6 +1949,15 @@ def create_gradio_interface():
     run_log = gr.Textbox(label="Run log", lines=10, interactive=False)
     progress_bar = gr.HTML("<div class='custom-progress'><span id='progress' class='bar' style='width:0%'>0%</span></div>")
 
+    # Output placeholders used by training and visualization sections. Creating
+    # them early ensures `.click()` registrations can safely reference them
+    # while still inside the active Blocks context.
+    scorecard_output = gr.DataFrame()
+    best_model_output = gr.Markdown()
+    key_takeaways = gr.Markdown()
+    roc_output = gr.Image(type="filepath")
+    conf_output = gr.Image(type="filepath")
+
     # Wrap top header in a white card for contrast
     gr.HTML("<div class='main-card'>")
 
@@ -2086,14 +2095,11 @@ def create_gradio_interface():
         with gr.Row():
             with gr.Column():
                 gr.Markdown("### Performance")
-                scorecard_output = gr.DataFrame()
-                best_model_output = gr.Markdown()
-                key_takeaways = gr.Markdown()
+                # ...existing code uses the earlier placeholders
 
             with gr.Column():
                 gr.Markdown("### Visualizations")
-                roc_output = gr.Image(type="filepath")
-                conf_output = gr.Image(type="filepath")
+                # ...existing code uses the earlier placeholders
 
         # SHAP
         gr.Markdown("## SHAP Analysis")
