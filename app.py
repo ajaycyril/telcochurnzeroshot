@@ -1754,6 +1754,23 @@ def preview_dataset_handler(uploaded_file=None):
     except Exception:
         return pd.DataFrame()
 
+
+def download_dataset_handler():
+    """Module-level download handler used by the UI buttons (calls kaggle downloader)."""
+    try:
+        success, msg = kaggle_download_telco()
+        if success:
+            try:
+                df = pd.read_csv(TELCO_CSV)
+                preview = df.head(20)
+            except Exception:
+                preview = pd.DataFrame()
+            return msg, preview
+        else:
+            return msg, pd.DataFrame()
+    except Exception as e:
+        return f"Download error: {e}", pd.DataFrame()
+
 def create_gradio_interface():
     """
     Create an absolutely minimal, 100% compatible Gradio interface for older versions.
@@ -1882,8 +1899,8 @@ def create_gradio_interface():
                 download_btn = gr.Button("Download dataset (Kaggle)")
                 # Register lightweight handlers immediately after button creation to
                 # ensure the Blocks context is active when .click() is called (older Gradio compatibility)
-                preview_btn.click(fn=preview_dataset, inputs=[file_input], outputs=[dataset_preview])
-                download_btn.click(fn=lambda: ("Download not started yet", pd.DataFrame()), inputs=None, outputs=[download_log, dataset_preview])
+                preview_btn.click(fn=preview_dataset_handler, inputs=[file_input], outputs=[dataset_preview])
+                download_btn.click(fn=download_dataset_handler, inputs=None, outputs=[download_log, dataset_preview])
                 download_log = gr.Textbox(label="Download log", lines=6)
                 mode_toggle = gr.Radio(choices=["Fast", "Full"], value="Fast", label="Mode")
                 file_input = gr.File(file_count="single", file_types=['.csv'], label="Upload CSV (optional)")
