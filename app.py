@@ -1968,13 +1968,9 @@ def create_gradio_interface():
     status_text = gr.Markdown("Status: Ready")
     time_estimate = gr.Markdown("Time: Calculating...")
 
-    # File upload and quick preview/download controls — create early and
-    # register handlers immediately to satisfy older Gradio semantics
-    file_input = gr.File(file_count="single", file_types=['.csv'], label="Upload CSV (optional)")
-    preview_btn = gr.Button("Preview Dataset")
-    download_btn = gr.Button("Download dataset (Kaggle)")
-    preview_btn.click(fn=preview_dataset_handler, inputs=[file_input], outputs=[dataset_preview])
-    download_btn.click(fn=download_dataset_handler, inputs=None, outputs=[download_log, dataset_preview])
+    # File input and preview/download handlers were created earlier at the
+    # top of the Blocks context; do not recreate them here (would shadow
+    # variables and cause duplicate registrations).
 
     # Output placeholders used by training and visualization sections. Creating
     # them early ensures `.click()` registrations can safely reference them
