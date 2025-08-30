@@ -2115,43 +2115,45 @@ Cross-Validation:
                 return pd.DataFrame()
 
         # Register event handlers at the Blocks scope (must be inside the with-gr.Blocks context)
-        preview_btn.click(fn=preview_dataset, inputs=[file_input], outputs=[dataset_preview])
-        
-        def download_dataset():
-            # Run the kaggle downloader and capture the message
-            try:
-                success, msg = kaggle_download_telco()
-                if success:
-                    # return log and a small preview
-                    try:
-                        df = pd.read_csv(TELCO_CSV)
-                        preview = df.head(20)
-                    except Exception:
-                        preview = pd.DataFrame()
-                    return msg, preview
-                else:
-                    return msg, pd.DataFrame()
-            except Exception as e:
-                return f"Download error: {e}", pd.DataFrame()
+        # Re-enter the demo Blocks context explicitly to be compatible with older gradio
+        with demo:
+            preview_btn.click(fn=preview_dataset, inputs=[file_input], outputs=[dataset_preview])
 
-        download_btn.click(fn=download_dataset, inputs=None, outputs=[download_log, dataset_preview])
+            def download_dataset():
+                # Run the kaggle downloader and capture the message
+                try:
+                    success, msg = kaggle_download_telco()
+                    if success:
+                        # return log and a small preview
+                        try:
+                            df = pd.read_csv(TELCO_CSV)
+                            preview = df.head(20)
+                        except Exception:
+                            preview = pd.DataFrame()
+                        return msg, preview
+                    else:
+                        return msg, pd.DataFrame()
+                except Exception as e:
+                    return f"Download error: {e}", pd.DataFrame()
 
-        # Connect event handlers (registered inside Blocks context)
-        btn_train.click(
-            fn=train_models,
-            inputs=[cv_folds, ensemble_size, feature_selection, lr_checkbox, rf_checkbox, gb_checkbox, xgb_checkbox, cat_checkbox, mode_toggle, file_input],
-            outputs=[scorecard_output, best_model_output, roc_output, conf_output, status_text, time_estimate, run_log, key_takeaways, progress_bar]
-        )
+            download_btn.click(fn=download_dataset, inputs=None, outputs=[download_log, dataset_preview])
 
-        btn_test.click(
-            fn=test_ui,
-            outputs=[status_text, time_estimate]
-        )
+            # Connect event handlers (registered inside Blocks context)
+            btn_train.click(
+                fn=train_models,
+                inputs=[cv_folds, ensemble_size, feature_selection, lr_checkbox, rf_checkbox, gb_checkbox, xgb_checkbox, cat_checkbox, mode_toggle, file_input],
+                outputs=[scorecard_output, best_model_output, roc_output, conf_output, status_text, time_estimate, run_log, key_takeaways, progress_bar]
+            )
 
-        btn_shap.click(
-            fn=compute_shap,
-            outputs=[shap_summary, shap_bar]
-        )
+            btn_test.click(
+                fn=test_ui,
+                outputs=[status_text, time_estimate]
+            )
+
+            btn_shap.click(
+                fn=compute_shap,
+                outputs=[shap_summary, shap_bar]
+            )
 
         # Quick demo flow – concise and professional guidance for live demos
         with gr.Row():
