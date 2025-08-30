@@ -573,6 +573,22 @@ def get_tuned_models(preprocessor, X_train, y_train):
 
     return models
 
+
+def _get_final_estimator(obj):
+    """Return the final estimator for common wrappers (Pipeline) or the object itself.
+
+    This avoids indexing like obj[-1] which fails for non-subscriptable estimators
+    such as VotingClassifier.
+    """
+    try:
+        # sklearn Pipeline exposes `steps`
+        if hasattr(obj, 'steps') and isinstance(obj.steps, (list, tuple)) and len(obj.steps) > 0:
+            return obj.steps[-1][1]
+    except Exception:
+        pass
+    # Fallback: return the object itself
+    return obj
+
 def create_ensemble_model(models, preprocessor, X_train, y_train):
     """
     Create a voting ensemble from the best models.
@@ -599,8 +615,10 @@ def create_ensemble_model(models, preprocessor, X_train, y_train):
     return models
 
 def evaluate_models(X_train, y_train, X_test, y_test, models):
-    """
-    Advanced evaluation with multiple metrics and ensemble creation.
+    """Evaluate a list of (name, estimator) pairs and return scorecard, plots and trained objects.
+
+    This implementation avoids indexing into pipeline-like objects (e.g. pipe[-1]) and
+    uses _get_final_estimator to extract the underlying estimator where needed.
     """
     results = []
     trained = {}
@@ -612,23 +630,49 @@ def evaluate_models(X_train, y_train, X_test, y_test, models):
     # CV first, pick best by mean CV AUC
     cv_auc_by_model = []
     for name, pipe in models:
-        cv_auc = cross_val_score(pipe, X_train, y_train, scoring="roc_auc", cv=skf, n_jobs=-1)
-        cv_auc_by_model.append((name, cv_auc.mean(), cv_auc.std()))
+        try:
+            cv_auc = cross_val_score(pipe, X_train, y_train, scoring="roc_auc", cv=skf, n_jobs=-1)
+            cv_auc_by_model.append((name, cv_auc.mean(), cv_auc.std()))
+        except Exception:
+            cv_auc_by_model.append((name, np.nan, np.nan))
 
     # Sort by CV AUC
-    cv_auc_by_model.sort(key=lambda t: t[1], reverse=True)
-    
-    # Fit all models
+    cv_auc_by_model.sort(key=lambda t: (t[1] if not np.isnan(t[1]) else -1.0), reverse=True)
+
+    # Fit and evaluate all models
     for name, pipe in models:
-        pipe.fit(X_train, y_train)
+        try:
+            pipe.fit(X_train, y_train)
+        except Exception:
+            # If a model fails to fit, skip it but keep moving
+            continue
         trained[name] = pipe
-        
-        # Get predictions
-        if hasattr(pipe[-1], "predict_proba"):
-            y_proba = pipe.predict_proba(X_test)[:, 1]
-        else:
-            if hasattr(pipe[-1], "decision_function"):
+
+        # Resolve final estimator and try to get probabilities
+        final_est = _get_final_estimator(pipe)
+
+        y_proba = None
+        # Prefer top-level predict_proba
+        if hasattr(pipe, "predict_proba"):
+            try:
+                y_proba = pipe.predict_proba(X_test)[:, 1]
+            except Exception:
+                y_proba = None
+
+        # Fallbacks
+        if y_proba is None and hasattr(final_est, "predict_proba"):
+            try:
+                y_proba = final_est.predict_proba(X_test)[:, 1]
+            except Exception:
+                y_proba = None
+
+        if y_proba is None:
+            # Try decision_function then scale to [0,1]
+            if hasattr(pipe, "decision_function"):
                 raw = pipe.decision_function(X_test)
+                y_proba = (raw - raw.min()) / (raw.max() - raw.min() + 1e-9)
+            elif hasattr(final_est, "decision_function"):
+                raw = final_est.decision_function(X_test)
                 y_proba = (raw - raw.min()) / (raw.max() - raw.min() + 1e-9)
             else:
                 y_proba = np.zeros_like(y_test, dtype=float)
@@ -636,7 +680,11 @@ def evaluate_models(X_train, y_train, X_test, y_test, models):
         y_pred = (y_proba >= 0.5).astype(int)
 
         # Calculate comprehensive metrics
-        test_auc = roc_auc_score(y_test, y_proba)
+        try:
+            test_auc = roc_auc_score(y_test, y_proba)
+        except Exception:
+            test_auc = float('nan')
+
         acc = accuracy_score(y_test, y_pred)
         f1 = f1_score(y_test, y_pred)
         precision = precision_score(y_test, y_pred)
@@ -647,60 +695,91 @@ def evaluate_models(X_train, y_train, X_test, y_test, models):
 
         results.append({
             "Model": name,
-            "CV AUC Mean": round(cv_mean, 4),
-            "CV AUC Std": round(cv_std, 4),
-            "Test AUC": round(test_auc, 4),
+            "CV AUC Mean": round(cv_mean, 4) if not np.isnan(cv_mean) else np.nan,
+            "CV AUC Std": round(cv_std, 4) if not np.isnan(cv_std) else np.nan,
+            "Test AUC": round(test_auc, 4) if not np.isnan(test_auc) else np.nan,
             "Test Accuracy": round(acc, 4),
             "Test F1": round(f1, 4),
             "Test Precision": round(precision, 4),
             "Test Recall": round(recall, 4),
         })
 
-        fpr, tpr, _ = roc_curve(y_test, y_proba)
-        fprs.append(fpr); tprs.append(tpr)
-        aucs.append(auc(fpr, tpr))
-        names_for_roc.append(name)
+        # ROC components
+        try:
+            fpr, tpr, _ = roc_curve(y_test, y_proba)
+            fprs.append(fpr); tprs.append(tpr)
+            aucs.append(auc(fpr, tpr))
+            names_for_roc.append(name)
+        except Exception:
+            pass
 
     # Sort by test accuracy for final ranking
-    scorecard_df = pd.DataFrame(results).sort_values("Test Accuracy", ascending=False).reset_index(drop=True)
+    scorecard_df = pd.DataFrame(results)
+    if not scorecard_df.empty:
+        scorecard_df = scorecard_df.sort_values("Test Accuracy", ascending=False).reset_index(drop=True)
 
     # ROC plot (all models)
     roc_path = f"roc_all_{datetime.now().strftime('%H%M%S')}.png"
-    plt.figure(figsize=(10, 8))
-    for fpr, tpr, name in zip(fprs, tprs, names_for_roc):
-        plt.plot(fpr, tpr, label=f"{name} (AUC={auc(fpr,tpr):.3f})")
-    plt.plot([0, 1], [0, 1], "k--")
-    plt.xlabel("False Positive Rate"); plt.ylabel("True Positive Rate"); plt.title("ROC Curves (Test)")
-    plt.legend(loc="lower right")
-    plt.tight_layout()
-    plt.savefig(roc_path, dpi=130)
-    plt.close()
+    try:
+        plt.figure(figsize=(10, 8))
+        for fpr, tpr, name in zip(fprs, tprs, names_for_roc):
+            plt.plot(fpr, tpr, lw=2, label=f"{name} (AUC={auc(fpr,tpr):.3f})")
+        plt.plot([0, 1], [0, 1], linestyle='--', color='gray')
+        plt.xlabel("False Positive Rate")
+        plt.ylabel("True Positive Rate")
+        plt.title("ROC Curves (Test)")
+        plt.legend(loc="lower right", frameon=True)
+        plt.grid(alpha=0.25)
+        plt.tight_layout()
+        plt.savefig(roc_path, dpi=140, bbox_inches='tight')
+        plt.close()
+    except Exception:
+        roc_path = None
 
     # Confusion matrix (best by test accuracy)
-    best_row = scorecard_df.iloc[0]
-    best_name = best_row["Model"]
-    best_pipe = trained[best_name]
-    
-    if hasattr(best_pipe[-1], "predict_proba"):
-        best_proba = best_pipe.predict_proba(X_test)[:, 1]
-    else:
-        if hasattr(best_pipe[-1], "decision_function"):
-            raw = best_pipe[-1].decision_function(X_test)
-            best_proba = (raw - raw.min()) / (raw.max() - raw.min() + 1e-9)
-        else:
-            best_proba = np.zeros_like(y_test, dtype=float)
-    
-    best_pred = (best_proba >= 0.5).astype(int)
+    best_name = None
+    conf_path = None
+    if not scorecard_df.empty:
+        best_row = scorecard_df.iloc[0]
+        best_name = best_row["Model"]
+        best_pipe = trained.get(best_name)
+        if best_pipe is not None:
+            best_final = _get_final_estimator(best_pipe)
+            best_proba = None
+            if hasattr(best_pipe, "predict_proba"):
+                try:
+                    best_proba = best_pipe.predict_proba(X_test)[:, 1]
+                except Exception:
+                    best_proba = None
+            if best_proba is None and hasattr(best_final, "predict_proba"):
+                try:
+                    best_proba = best_final.predict_proba(X_test)[:, 1]
+                except Exception:
+                    best_proba = None
+            if best_proba is None:
+                if hasattr(best_pipe, "decision_function"):
+                    raw = best_pipe.decision_function(X_test)
+                    best_proba = (raw - raw.min()) / (raw.max() - raw.min() + 1e-9)
+                elif hasattr(best_final, "decision_function"):
+                    raw = best_final.decision_function(X_test)
+                    best_proba = (raw - raw.min()) / (raw.max() - raw.min() + 1e-9)
+                else:
+                    best_proba = np.zeros_like(y_test, dtype=float)
 
-    conf = confusion_matrix(y_test, best_pred)
-    conf_path = f"confusion_best_{datetime.now().strftime('%H%M%S')}.png"
-    disp = ConfusionMatrixDisplay(confusion_matrix=conf)
-    fig, ax = plt.subplots(figsize=(6, 6))
-    disp.plot(ax=ax, cmap="Blues", colorbar=False)
-    ax.set_title(f"Confusion Matrix (Best: {best_name})")
-    plt.tight_layout()
-    plt.savefig(conf_path, dpi=130)
-    plt.close()
+            best_pred = (best_proba >= 0.5).astype(int)
+            conf = confusion_matrix(y_test, best_pred)
+            conf_path = f"confusion_best_{datetime.now().strftime('%H%M%S')}.png"
+            try:
+                fig, ax = plt.subplots(figsize=(6, 6))
+                sns.heatmap(conf, annot=True, fmt='d', cmap='Blues', cbar=False, ax=ax)
+                ax.set_xlabel('Predicted')
+                ax.set_ylabel('Actual')
+                ax.set_title(f"Confusion Matrix (Best: {best_name})")
+                plt.tight_layout()
+                plt.savefig(conf_path, dpi=140, bbox_inches='tight')
+                plt.close()
+            except Exception:
+                conf_path = None
 
     return scorecard_df, roc_path, conf_path, best_name, trained
 
@@ -708,45 +787,44 @@ def evaluate_models(X_train, y_train, X_test, y_test, models):
 # SHAP Explainability
 # -------------------------------
 def compute_shap_images(trained_pipe, preprocessor, X_sample, feature_names_out, shap_sample=100):
-    """
-    Returns list of image paths for SHAP (summary & bar). If fails, returns [].
+    """Compute SHAP summary and bar plots for a trained pipeline/estimator.
+
+    Returns list of file paths written. On any failure returns an empty list.
     """
     paths = []
     try:
-        try:
-            import shap
-        except Exception:
-            print("shap library not available; skipping SHAP plots")
-            return []
+        import shap
+    except Exception:
+        print("shap library not available; skipping SHAP plots")
+        return []
 
+    try:
         # Transform X through preprocessor so SHAP sees the exact model input
         X_trans = preprocessor.transform(X_sample)
-        model = trained_pipe[-1]
+        model = _get_final_estimator(trained_pipe)
 
-        # Cap sample size
         n_sample = min(shap_sample, X_trans.shape[0])
 
-        # Choose explainer
+        # Choose explainer based on estimator characteristics
         explainer = None
         try:
-            if hasattr(model, "get_booster") or hasattr(model, "feature_importances_") or 'xgb' in type(model).__name__.lower() or 'catboost' in type(model).__name__.lower():
+            model_name = type(model).__name__.lower()
+            if hasattr(model, "get_booster") or hasattr(model, "feature_importances_") or 'xgb' in model_name or 'catboost' in model_name or 'lgbm' in model_name:
                 explainer = shap.TreeExplainer(model)
             else:
-                # Fallback: use KernelExplainer on a small background sample
+                # KernelExplainer is slow; use a small background sample
                 background = X_trans[: max(20, n_sample)]
-                explainer = shap.KernelExplainer(model.predict, background)
+                explainer = shap.KernelExplainer(lambda x: model.predict_proba(x)[:, 1] if hasattr(model, 'predict_proba') else model.predict(x), background)
         except Exception:
-            # Last-resort: try TreeExplainer, then give up
             try:
                 explainer = shap.TreeExplainer(model)
             except Exception:
                 print("Failed to construct SHAP explainer for model")
                 return []
 
-        # Compute SHAP values
         shap_values = explainer.shap_values(X_trans[:n_sample])
 
-        # Handle multi-output case (common for classification)
+        # Handle multi-output case (classification)
         if isinstance(shap_values, list) and len(shap_values) > 1:
             shap_values = shap_values[1]
 
@@ -1248,11 +1326,23 @@ def evaluate_models(X_train, y_train, X_test, y_test, models):
     best_name = best_row["Model"]
     best_pipe = trained[best_name]
     
-    if hasattr(best_pipe[-1], "predict_proba"):
-        best_proba = best_pipe.predict_proba(X_test)[:, 1]
+    best_final = _get_final_estimator(best_pipe)
+    if hasattr(best_pipe, "predict_proba"):
+        try:
+            best_proba = best_pipe.predict_proba(X_test)[:, 1]
+        except Exception:
+            if hasattr(best_final, "predict_proba"):
+                best_proba = best_final.predict_proba(X_test)[:, 1]
+            else:
+                best_proba = np.zeros_like(y_test, dtype=float)
+    elif hasattr(best_final, "predict_proba"):
+        best_proba = best_final.predict_proba(X_test)[:, 1]
     else:
-        if hasattr(best_pipe[-1], "decision_function"):
-            raw = best_pipe[-1].decision_function(X_test)
+        if hasattr(best_pipe, "decision_function"):
+            raw = best_pipe.decision_function(X_test)
+            best_proba = (raw - raw.min()) / (raw.max() - raw.min() + 1e-9)
+        elif hasattr(best_final, "decision_function"):
+            raw = best_final.decision_function(X_test)
             best_proba = (raw - raw.min()) / (raw.max() - raw.min() + 1e-9)
         else:
             best_proba = np.zeros_like(y_test, dtype=float)
@@ -1272,56 +1362,6 @@ def evaluate_models(X_train, y_train, X_test, y_test, models):
     plt.close()
 
     return scorecard_df, roc_path, conf_path, best_name, trained
-
-# -------------------------------
-# SHAP Explainability
-# -------------------------------
-def compute_shap_images(trained_pipe, preprocessor, X_sample, feature_names_out):
-    """
-    Returns list of image paths for SHAP (summary & bar). If fails, returns [].
-    """
-    paths = []
-    try:
-        # Transform X through preprocessor so SHAP sees the exact model input
-        X_trans = preprocessor.transform(X_sample)
-        model = trained_pipe[-1]
-
-        # Pick explainer by estimator type
-        if hasattr(model, "predict_proba"):
-            explainer = shap.TreeExplainer(model) if hasattr(model, "tree_") else shap.LinearExplainer(model, X_trans)
-        else:
-            explainer = shap.KernelExplainer(model.predict, X_trans[:100])  # sample for speed
-
-        # SHAP values
-        shap_values = explainer.shap_values(X_trans)
-
-        # Handle multi-output case
-        if isinstance(shap_values, list):
-            shap_values = shap_values[1]  # positive class
-
-        # Summary plot
-        summary_path = f"shap_summary_{datetime.now().strftime('%H%M%S')}.png"
-        plt.figure(figsize=(10, 8))
-        shap.summary_plot(shap_values, X_trans, feature_names=feature_names_out, show=False)
-        plt.tight_layout()
-        plt.savefig(summary_path, dpi=130, bbox_inches='tight')
-        plt.close()
-        paths.append(summary_path)
-
-        # Bar plot
-        bar_path = f"shap_bar_{datetime.now().strftime('%H%M%S')}.png"
-        plt.figure(figsize=(10, 8))
-        shap.summary_plot(shap_values, X_trans, feature_names=feature_names_out, plot_type="bar", show=False)
-        plt.tight_layout()
-        plt.savefig(bar_path, dpi=130, bbox_inches='tight')
-        plt.close()
-        paths.append(bar_path)
-
-    except Exception as e:
-        print(f"SHAP computation failed: {e}")
-        return []
-
-    return paths
 
 # -------------------------------
 # Main processing function
