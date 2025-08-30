@@ -57,6 +57,20 @@ import shap
 import gradio as gr
 import joblib
 
+# Runtime compatibility: print Gradio version and suggest upgrade when old
+try:
+    _gr_version = getattr(gr, "__version__", "0")
+    print(f"[DEBUG] Gradio version detected: {_gr_version}")
+    # Graceful suggestion for Spaces logs (non-fatal)
+    try:
+        from packaging import version as _pv
+        if _pv.parse(_gr_version) < _pv.parse("4.44.1"):
+            print("[WARN] Gradio older than 4.44.1 detected. Consider upgrading in the environment to match tested behavior.")
+    except Exception:
+        pass
+except Exception:
+    pass
+
 
 # -------------------------------
 # Constants / Defaultss
@@ -1264,13 +1278,28 @@ def evaluate_models(X_train, y_train, X_test, y_test, models):
     for name, pipe in models:
         pipe.fit(X_train, y_train)
         trained[name] = pipe
-        
-        # Get predictions
-        if hasattr(pipe[-1], "predict_proba"):
-            y_proba = pipe.predict_proba(X_test)[:, 1]
-        else:
-            if hasattr(pipe[-1], "decision_function"):
+        # Get final estimator safely (handles Pipeline, VotingClassifier, etc.)
+        final_est = _get_final_estimator(pipe)
+        y_proba = None
+        # Prefer pipeline-level predict_proba if available
+        if hasattr(pipe, "predict_proba"):
+            try:
+                y_proba = pipe.predict_proba(X_test)[:, 1]
+            except Exception:
+                y_proba = None
+        # Fall back to final estimator's predict_proba
+        if y_proba is None and hasattr(final_est, "predict_proba"):
+            try:
+                y_proba = final_est.predict_proba(X_test)[:, 1]
+            except Exception:
+                y_proba = None
+        # Last resort: use decision_function or zeros
+        if y_proba is None:
+            if hasattr(pipe, "decision_function"):
                 raw = pipe.decision_function(X_test)
+                y_proba = (raw - raw.min()) / (raw.max() - raw.min() + 1e-9)
+            elif hasattr(final_est, "decision_function"):
+                raw = final_est.decision_function(X_test)
                 y_proba = (raw - raw.min()) / (raw.max() - raw.min() + 1e-9)
             else:
                 y_proba = np.zeros_like(y_test, dtype=float)
@@ -2014,6 +2043,21 @@ Cross-Validation:
             fn=compute_shap,
             outputs=[shap_summary, shap_bar]
         )
+
+        # Quick demo flow – concise and professional guidance for live demos
+        with gr.Row():
+            with gr.Column():
+                gr.Markdown("---")
+                gr.Markdown("## Quick demo flow")
+                gr.Markdown(
+                    "1. Load or upload a CSV and click 'Preview Dataset' to verify the table and datatypes.\n"
+                    "2. Select models and choose 'Fast' for a fast end-to-end run or 'Full' for thorough tuning.\n"
+                    "3. Click 'Start Training' and watch the Status messages for data, feature engineering, tuning, and evaluation steps.\n"
+                    "4. Inspect the scorecard and ROC/Confusion visualizations to evaluate performance tradeoffs.\n"
+                    "5. Use 'Compute SHAP' to produce global and per-feature explainability artifacts.\n"
+                    "6. Download or persist trained models from the /models folder for production use."
+                )
+                gr.Markdown("---")
 
         # On load (Spaces start), attempt to ensure dataset is present and show a preview
         def _on_startup():
