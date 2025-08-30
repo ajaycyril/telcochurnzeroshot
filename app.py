@@ -56,6 +56,9 @@ import shap
 
 import gradio as gr
 import joblib
+import threading
+import time
+import builtins
 
 # Runtime compatibility: print Gradio version and suggest upgrade when old
 try:
@@ -1766,7 +1769,7 @@ def create_gradio_interface():
                 gr.Markdown("## Dataset Analysis")
                 gr.Markdown("Telco Churn Dataset: 7,043 customers, 42 features")
                 gr.Markdown("Target: 83%+ accuracy for churn prediction")
-                
+
                 gr.Markdown("---")
                 gr.Markdown("## Approach & Positioning")
                 gr.Markdown(
@@ -1779,7 +1782,7 @@ def create_gradio_interface():
                     "- Explainability: SHAP summary and per-feature contributions so predictions are actionable and auditable.\n\n"
                     "Design goals: reproducibility, clear decision records, and an educational narrative that explains tradeoffs (speed vs. accuracy, interpretability vs. capacity)."
                 )
-                
+
                 gr.Markdown("## ML Features")
                 gr.Markdown("- Advanced Feature Engineering (tenure groups, charge ratios, service interactions)")
                 gr.Markdown("- Stratified cross-validation & calibrated scoring")
@@ -1796,7 +1799,7 @@ def create_gradio_interface():
                     "- Use `Preview Dataset` to inspect uploaded or downloaded CSV before training.\n"
                     "- After training, explore ROC and confusion plots to understand class tradeoffs; use SHAP to justify individual predictions for stakeholders."
                 )
-                
+
                 gr.Markdown("---")
                 gr.Markdown("## Getting started (step-by-step)")
                 gr.Markdown(
@@ -1821,10 +1824,10 @@ def create_gradio_interface():
                     "- Calibrate predicted probabilities (Platt or isotonic) for better thresholding.\n"
                     "- Ensemble top performers and validate on a holdout set for robustness.\n"
                 )
-                
+
             with gr.Column():
                 gr.Markdown("## Configuration")
-                
+
                 # Model Selection (labeled)
                 gr.Markdown("### Model Selection")
                 lr_checkbox = gr.Checkbox(label="Logistic Regression")
@@ -1832,7 +1835,7 @@ def create_gradio_interface():
                 gb_checkbox = gr.Checkbox(label="Gradient Boosting")
                 xgb_checkbox = gr.Checkbox(label="XGBoost")
                 cat_checkbox = gr.Checkbox(label="CatBoost")
-                
+
                 # Options
                 gr.Markdown("### Options")
                 cv_folds = gr.Number(value=3, label="CV Folds (3-10)")
@@ -1848,12 +1851,14 @@ def create_gradio_interface():
         gr.Markdown("## Training")
         btn_train = gr.Button("Start Training")
         btn_test = gr.Button("Test UI")
-                
+
         # Status
         status_text = gr.Markdown("Status: Ready")
         time_estimate = gr.Markdown("Time: Calculating...")
         dataset_preview = gr.DataFrame(headers=None, interactive=False)
-                
+        # Run log (scrollable) to surface terminal output from training
+        run_log = gr.Textbox(label="Run log", lines=10, interactive=False)
+
         # Results
         gr.Markdown("## Results")
         with gr.Row():
@@ -1861,12 +1866,13 @@ def create_gradio_interface():
                 gr.Markdown("### Performance")
                 scorecard_output = gr.DataFrame()
                 best_model_output = gr.Markdown()
-                
+                key_takeaways = gr.Markdown()
+
             with gr.Column():
                 gr.Markdown("### Visualizations")
                 roc_output = gr.Image(type="filepath")
                 conf_output = gr.Image(type="filepath")
-        
+
         # SHAP
         gr.Markdown("## SHAP Analysis")
         with gr.Row():
@@ -2031,7 +2037,7 @@ Cross-Validation:
         btn_train.click(
             fn=train_models,
             inputs=[cv_folds, ensemble_size, feature_selection, lr_checkbox, rf_checkbox, gb_checkbox, xgb_checkbox, cat_checkbox, mode_toggle, file_input],
-            outputs=[scorecard_output, best_model_output, roc_output, conf_output, status_text, time_estimate]
+            outputs=[scorecard_output, best_model_output, roc_output, conf_output, status_text, time_estimate, run_log, key_takeaways]
         )
 
         btn_test.click(
