@@ -2050,10 +2050,8 @@ def create_gradio_interface():
                 file_input = gr.File(file_count="single", file_types=['.csv'], label="Upload CSV (optional)")
                 preview_btn = gr.Button("Preview Dataset")
                 download_btn = gr.Button("Download dataset (Kaggle)")
-                # Preview area must exist before registering handlers that reference it
-                dataset_preview = gr.DataFrame(headers=None, interactive=False)
-                # Handlers registered later after all components are created
-                download_log = gr.Textbox(label="Download log", lines=6)
+                # Preview area and download_log are created earlier so handlers
+                # can reference them safely without shadowing the names.
                 # Register preview/download handlers immediately to avoid
                 # calling .click() later when variables may be out-of-scope.
                 preview_btn.click(fn=preview_dataset_handler, inputs=[file_input], outputs=[dataset_preview])
