@@ -1322,10 +1322,11 @@ def compute_shap_images(trained_pipe, preprocessor, X_sample, feature_names_out)
 # -------------------------------
 # Main processing function
 # -------------------------------
-def train_selected_models_only(selected_models, allow_install=False, fast=False):
+def train_selected_models_only(selected_models, allow_install=False, fast=False, uploaded_file=None):
     """Train only the selected models based on UI selections. Returns a result dict.
 
     - fast: when True use compact grids and smaller SHAP samples to run on resource-limited hosts.
+    - uploaded_file: optional path-like or file object for a user-supplied CSV; forwarded to data loader.
     """
     try:
         # Ensure optional libraries (may attempt install if allow_install)
@@ -1333,7 +1334,7 @@ def train_selected_models_only(selected_models, allow_install=False, fast=False)
         print(f"[{datetime.now().strftime('%H:%M:%S')}] Available libraries: {available}")
 
         # Load and prepare data
-        df = load_telco_data()
+        df = load_telco_data(uploaded_file=uploaded_file)
         preprocessor, numeric_cols, categorical_cols = get_preprocessor(df)
 
         X_train, X_test, y_train, y_test = split_xy(df)
