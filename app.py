@@ -285,12 +285,15 @@ def load_telco_data(uploaded_file=None):
             df = engineer_features(df)
             return df
 
-    # If we reach here, nothing worked
-    raise FileNotFoundError(f"Dataset not found: {TELCO_CSV}. Kaggle attempt message: {msg}")
-
-    # Advanced feature engineering (best-effort - keep generic)
-    df = engineer_features(df)
-    return df
+    # If we reach here, nothing worked. Don't raise here during UI build —
+    # return an empty DataFrame and log a warning so the Space can still
+    # start and surface a clear message to the user.
+    try:
+        warn_msg = msg
+    except Exception:
+        warn_msg = "(no kaggle message available)"
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] WARNING: Dataset not found: {TELCO_CSV}. Kaggle attempt message: {warn_msg}")
+    return pd.DataFrame()
 
 def engineer_features(df):
     """
@@ -1957,36 +1960,36 @@ def create_gradio_interface():
     </style>
     """)
 
-    # Reserve commonly referenced components early so handlers can reference them safely
-    # (dataset_preview and download_log were already created above at the top
-    # of the Blocks context when registering handlers for older Gradio.)
-    run_log = gr.Textbox(label="Run log", lines=10, interactive=False)
-    progress_bar = gr.HTML("<div class='custom-progress'><span id='progress' class='bar' style='width:0%'>0%</span></div>")
+        # Reserve commonly referenced components early so handlers can reference them safely
+        # (dataset_preview and download_log were already created above at the top
+        # of the Blocks context when registering handlers for older Gradio.)
+        run_log = gr.Textbox(label="Run log", lines=10, interactive=False)
+        progress_bar = gr.HTML("<div class='custom-progress'><span id='progress' class='bar' style='width:0%'>0%</span></div>")
 
-    # Early status outputs so handler registrations can reference them safely
-    # (ensure a concrete assignment exists — older edits sometimes left this dangling)
-    status_text = gr.Markdown("Status: Ready")
-    time_estimate = gr.Markdown("Time: Calculating...")
+        # Early status outputs so handler registrations can reference them safely
+        # (ensure a concrete assignment exists — older edits sometimes left this dangling)
+        status_text = gr.Markdown("Status: Ready")
+        time_estimate = gr.Markdown("Time: Calculating...")
 
     # File input and preview/download handlers were created earlier at the
     # top of the Blocks context; do not recreate them here (would shadow
     # variables and cause duplicate registrations).
 
-    # Output placeholders used by training and visualization sections. Creating
-    # them early ensures `.click()` registrations can safely reference them
-    # while still inside the active Blocks context.
-    out_scorecard = gr.DataFrame()
-    out_best_model = gr.Markdown()
-    out_key_takeaways = gr.Markdown()
-    out_roc = gr.Image(type="filepath")
-    out_conf = gr.Image(type="filepath")
+        # Output placeholders used by training and visualization sections. Creating
+        # them early ensures `.click()` registrations can safely reference them
+        # while still inside the active Blocks context.
+        out_scorecard = gr.DataFrame()
+        out_best_model = gr.Markdown()
+        out_key_takeaways = gr.Markdown()
+        out_roc = gr.Image(type="filepath")
+        out_conf = gr.Image(type="filepath")
 
-    # Wrap top header in a white card for contrast
-    gr.HTML("<div class='main-card'>")
+        # Wrap top header in a white card for contrast
+        gr.HTML("<div class='main-card'>")
 
-    # Header
-    gr.Markdown("# Enterprise ML Pipeline - Telco Churn Prediction")
-    gr.Markdown("AI Expert-Grade Machine Learning")
+        # Header
+        gr.Markdown("# Enterprise ML Pipeline - Telco Churn Prediction")
+        gr.Markdown("AI Expert-Grade Machine Learning")
 
     with gr.Row():
         with gr.Column():
@@ -2069,34 +2072,37 @@ def create_gradio_interface():
                 # file_input, preview_btn and download_btn are created earlier
                 # (top of Blocks) and their handlers are already registered.
         
-        # Controls
-        gr.Markdown("## Training")
-        btn_train = gr.Button("Start Training")
-        btn_test = gr.Button("Test UI")
+                # Controls
+                gr.Markdown("## Training")
+                # Create button first
+                btn_train = gr.Button("Start Training")
+                # Then immediately register click handler in a separate statement
+                # This is crucial for compatibility with Gradio 4.31.0
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Registering train button click handler")
+                btn_train.click(
+                    fn=train_streaming_handler,
+                    inputs=[cv_folds, ensemble_size, feature_selection, lr_checkbox, rf_checkbox, gb_checkbox, xgb_checkbox, cat_checkbox, mode_toggle, file_input],
+                    outputs=[out_scorecard, out_best_model, out_roc, out_conf, status_text, time_estimate, run_log, out_key_takeaways, progress_bar]
+                )
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Train button click handler registered")
 
-        # Register event handlers immediately after creating the controls to
-        # ensure compatibility with older Gradio versions where `.click()` must
-        # be called while the Blocks context is active and shortly after the
-        # component is created.
-        btn_train.click(
-            fn=train_streaming_handler,
-            inputs=[cv_folds, ensemble_size, feature_selection, lr_checkbox, rf_checkbox, gb_checkbox, xgb_checkbox, cat_checkbox, mode_toggle, file_input],
-            outputs=[out_scorecard, out_best_model, out_roc, out_conf, status_text, time_estimate, run_log, out_key_takeaways, progress_bar]
-        )
-
-        btn_test.click(
-            fn=test_ui_handler,
-            outputs=[status_text, time_estimate]
-        )
+                # Create button first
+                btn_test = gr.Button("Test UI")
+                # Then immediately register click handler in a separate statement
+                # This is crucial for compatibility with Gradio 4.31.0
+                btn_test.click(
+                    fn=test_ui_handler,
+                    outputs=[status_text, time_estimate]
+                )
 
 
     # Run log (scrollable) to surface terminal output from training
     # (placeholders created earlier)
 
-        # Results
-        gr.Markdown("## Results")
-        gr.HTML("</div>")
-        gr.HTML("<div class='results-card'>")
+                # Results
+                gr.Markdown("## Results")
+                gr.HTML("</div>")
+                gr.HTML("<div class='results-card'>")
         # Plain-English guidance for non-technical viewers
         gr.Markdown(
             "### Quick read: What you just saw (plain English)\n"
@@ -2114,48 +2120,51 @@ def create_gradio_interface():
                 gr.Markdown("### Visualizations")
                 # ...existing code uses the earlier placeholders
 
-        # SHAP
-        gr.Markdown("## SHAP Analysis")
-        with gr.Row():
-            with gr.Column():
-                # Constrain SHAP images to a wrapper so CSS can control sizing
-                shap_summary = gr.HTML("<div id='shap-area'></div>")
-            with gr.Column():
-                shap_bar = gr.HTML("<div id='shap-area'></div>")
-                btn_shap = gr.Button("Compute SHAP")
+                # SHAP
+                gr.Markdown("## SHAP Analysis")
+                with gr.Row():
+                    with gr.Column():
+                        # Constrain SHAP images to a wrapper so CSS can control sizing
+                        shap_summary = gr.HTML("<div id='shap-area'></div>")
+                    with gr.Column():
+                        shap_bar = gr.HTML("<div id='shap-area'></div>")
+                        btn_shap = gr.Button("Compute SHAP")
                 # Register SHAP compute handler immediately
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Registering SHAP button click handler")
                 btn_shap.click(fn=compute_shap_handler, outputs=[shap_summary, shap_bar])
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: SHAP click handler registered")                # Preview and download handlers are registered earlier next to their components.
 
-    # Preview and download handlers are registered earlier next to their components.
-
-        # Quick demo flow – concise and professional guidance for live demos
-        with gr.Row():
-            with gr.Column():
-                gr.Markdown("---")
-                gr.Markdown("## Quick demo flow")
-                gr.Markdown(
-                    "1. Load or upload a CSV and click 'Preview Dataset' to verify the table and datatypes.\n"
-                    "2. Select models and choose 'Fast' for a fast end-to-end run or 'Full' for thorough tuning.\n"
-                    "3. Click 'Start Training' and watch the Status messages for data, feature engineering, tuning, and evaluation steps.\n"
-                    "4. Inspect the scorecard and ROC/Confusion visualizations to evaluate performance tradeoffs.\n"
-                    "5. Use 'Compute SHAP' to produce global and per-feature explainability artifacts.\n"
-                    "6. Download or persist trained models from the /models folder for production use."
+                # Quick demo flow – concise and professional guidance for live demos
+                with gr.Row():
+                    with gr.Column():
+                        gr.Markdown("---")
+                        gr.Markdown("## Quick demo flow")
+                        gr.Markdown(
+                            "1. Load or upload a CSV and click 'Preview Dataset' to verify the table and datatypes.\n"
+                            "2. Select models and choose 'Fast' for a fast end-to-end run or 'Full' for thorough tuning.\n"
+                            "3. Click 'Start Training' and watch the Status messages for data, feature engineering, tuning, and evaluation steps.\n"
+                            "4. Inspect the scorecard and ROC/Confusion visualizations to evaluate performance tradeoffs.\n"
+                            "5. Use 'Compute SHAP' to produce global and per-feature explainability artifacts.\n"
+                            "6. Download or persist trained models from the /models folder for production use."
                 )
                 gr.Markdown("---")
 
         # On load (Spaces start), attempt to ensure dataset is present and show a preview
-        def _on_startup():
-            # Try to load data via the same loader; returns a small preview or error
-            try:
-                df = load_telco_data()
-                return df.head(20)
-            except Exception as e:
-                print(f"Startup dataset load failed: {e}")
-                return pd.DataFrame()
+                def _on_startup():
+                    # Try to load data via the same loader; returns a small preview or error
+                    try:
+                        df = load_telco_data()
+                        return df.head(20)
+                    except Exception as e:
+                        print(f"Startup dataset load failed: {e}")
+                        return pd.DataFrame()
 
-        # Hook into Gradio load so Spaces will execute the loader at startup
-        demo.load(fn=_on_startup, inputs=None, outputs=[dataset_preview])
+                # Hook into Gradio load so Spaces will execute the loader at startup
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Registering demo load handler")
+                demo.load(fn=_on_startup, inputs=None, outputs=[dataset_preview])
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Demo load handler registered")
 
+    # Critical: Make sure we're exiting the Blocks context correctly
     print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Exiting create_gradio_interface() and returning demo")
     return demo
 
