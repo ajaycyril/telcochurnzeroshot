@@ -1897,18 +1897,18 @@ Cross-Validation:
             outputs=[shap_summary, shap_bar]
         )
 
-            # On load (Spaces start), attempt to ensure dataset is present and show a preview
-            def _on_startup():
-                # Try to load data via the same loader; returns a small preview or error
-                try:
-                    df = load_telco_data()
-                    return gr.DataFrame.update(value=df.head(20))
-                except Exception as e:
-                    print(f"Startup dataset load failed: {e}")
-                    return gr.DataFrame.update(value=pd.DataFrame())
+        # On load (Spaces start), attempt to ensure dataset is present and show a preview
+        def _on_startup():
+            # Try to load data via the same loader; returns a small preview or error
+            try:
+                df = load_telco_data()
+                return gr.DataFrame.update(value=df.head(20))
+            except Exception as e:
+                print(f"Startup dataset load failed: {e}")
+                return gr.DataFrame.update(value=pd.DataFrame())
 
-            # Hook into Gradio load so Spaces will execute the loader at startup
-            demo.load(fn=_on_startup, inputs=None, outputs=[dataset_preview])
+        # Hook into Gradio load so Spaces will execute the loader at startup
+        demo.load(fn=_on_startup, inputs=None, outputs=[dataset_preview])
 
     print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Exiting create_gradio_interface() and returning demo")
     return demo
