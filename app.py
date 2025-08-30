@@ -1950,6 +1950,7 @@ def create_gradio_interface():
     progress_bar = gr.HTML("<div class='custom-progress'><span id='progress' class='bar' style='width:0%'>0%</span></div>")
 
     # Early status outputs so handler registrations can reference them safely
+    # (ensure a concrete assignment exists — older edits sometimes left this dangling)
     status_text = gr.Markdown("Status: Ready")
     time_estimate = gr.Markdown("Time: Calculating...")
 
