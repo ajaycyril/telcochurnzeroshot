@@ -294,6 +294,7 @@ def load_telco_data(uploaded_file=None):
         warn_msg = "(no kaggle message available)"
     print(f"[{datetime.now().strftime('%H:%M:%S')}] WARNING: Dataset not found: {TELCO_CSV}. Kaggle attempt message: {warn_msg}")
     return pd.DataFrame()
+    return pd.DataFrame()
 
 def engineer_features(df):
     """
@@ -1908,100 +1909,127 @@ Cross-Validation:
 
 def create_gradio_interface():
     """
-    Create an absolutely minimal, 100% compatible Gradio interface for older versions.
+    Create an absolutely minimal interface that works with Gradio 4.31.0.
+    All components are created at top level inside a single Blocks() context,
+    and all event handlers are registered at the end before exiting context.
     """
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Entering create_gradio_interface()")
-    with gr.Blocks() as demo:
-        # Create commonly used placeholders first so handlers can reference
-        # them safely even when registered immediately for older Gradio.
-        dataset_preview = gr.DataFrame(headers=None, interactive=False)
-        download_log = gr.Textbox(label="Download log", lines=6)
-
-        # Create file input and preview/download buttons immediately so
-        # older Gradio versions see the .click() bindings while the
-        # Blocks context is freshly active.
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Creating bare minimal interface for Gradio 4.31.0")
+    
+    # Define demo outside any with blocks to ensure clean scope
+    demo = gr.Blocks()
+    
+    # ALL components are created inside this single with block
+    with demo:
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Creating base components")
+        
+        # Basic styling
+        gr.HTML("""<style>body { font-family: sans-serif; } .gr-button { margin: 5px; }</style>""")
+        
+        # UI Header
+        gr.Markdown("# Telco Churn Prediction")
+        
+        # Create ALL components first
+        # Input components
         file_input = gr.File(file_count="single", file_types=['.csv'], label="Upload CSV (optional)")
         preview_btn = gr.Button("Preview Dataset")
         download_btn = gr.Button("Download dataset (Kaggle)")
-        preview_btn.click(fn=preview_dataset_handler, inputs=[file_input], outputs=[dataset_preview])
-        download_btn.click(fn=download_dataset_handler, inputs=None, outputs=[download_log, dataset_preview])
-
-        # Harmonized world-class theme (light cards on dark background)
-        gr.HTML("""
-    <style>
-    body, .gradio-container { background: #0f1724 !important; color: #0b1220 !important; font-family: Inter, 'Segoe UI', Roboto, Arial, sans-serif; }
-
-    /* Container cards and panels */
-    .main-card { background: #ffffff; border-radius: 14px; padding: 22px; box-shadow: 0 8px 30px rgba(2,6,23,0.08); margin-bottom: 18px; }
-    .results-card { background: #f6fbff; border-radius: 12px; padding: 18px; box-shadow: 0 4px 18px rgba(2,6,23,0.06); }
-
-    /* Buttons */
-    .gr-button { background: linear-gradient(90deg,#06b6d4 0%, #2563eb 100%) !important; color: white !important; border-radius: 10px !important; padding: 10px 14px !important; font-weight: 700 !important; box-shadow: 0 8px 24px rgba(37,99,235,0.12); }
-    .gr-button:hover { transform: translateY(-2px); }
-
-    /* Headings */
-    .gr-markdown h1, .gr-markdown h2, .gr-markdown h3 { color: #0b1220 !important; }
-    .gr-markdown p, .gr-markdown li { color: #334155 !important; }
-
-    /* Dataframe and images */
-    .gr-dataframe, .gr-image, .gr-markdown, .gr-textbox { background: transparent; }
-    img { max-width:100% !important; height:auto !important; object-fit:contain !important; border-radius:10px; }
-    #shap-area img { background: #ffffff; padding:8px; border-radius:10px; box-shadow:0 6px 20px rgba(2,6,23,0.06); }
-
-    /* Run log */
-    textarea.gr-text-input { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', monospace !important; background:#0b1220 !important; color:#e6eef8 !important; border-radius:8px; padding:12px; }
-
-    /* Key takeaways */
-    .key-takeaways { background: #ffffff; border-radius:10px; padding:14px; color:#0b1220; box-shadow:0 4px 16px rgba(2,6,23,0.06); }
-
-    /* Progress */
-    .custom-progress { width:100%; background:#eef2ff; border-radius:8px; padding:6px; }
-    .custom-progress .bar { height:28px; border-radius:6px; background: linear-gradient(90deg,#06b6d4,#2563eb); color:white; text-align:center; font-weight:700; }
-    </style>
-    """)
-
-        # Reserve commonly referenced components early so handlers can reference them safely
-        # (dataset_preview and download_log were already created above at the top
-        # of the Blocks context when registering handlers for older Gradio.)
+        dataset_preview = gr.DataFrame(headers=None, interactive=False)
+        download_log = gr.Textbox(label="Download log", lines=6)
+        
+        # Status and outputs
         run_log = gr.Textbox(label="Run log", lines=10, interactive=False)
-        progress_bar = gr.HTML("<div class='custom-progress'><span id='progress' class='bar' style='width:0%'>0%</span></div>")
-
-        # Early status outputs so handler registrations can reference them safely
-        # (ensure a concrete assignment exists — older edits sometimes left this dangling)
-        status_text = gr.Markdown("Status: Ready")
+        progress_bar = gr.HTML("<div style='width:100%;background:#eee;border-radius:8px;padding:6px'><div style='width:0%;background:blue;color:white;text-align:center;'>0%</div></div>")
+        status_text = gr.Markdown("Status: Ready") 
         time_estimate = gr.Markdown("Time: Calculating...")
-
-    # File input and preview/download handlers were created earlier at the
-    # top of the Blocks context; do not recreate them here (would shadow
-    # variables and cause duplicate registrations).
-
-        # Output placeholders used by training and visualization sections. Creating
-        # them early ensures `.click()` registrations can safely reference them
-        # while still inside the active Blocks context.
+        
+        # Output components
         out_scorecard = gr.DataFrame()
         out_best_model = gr.Markdown()
         out_key_takeaways = gr.Markdown()
         out_roc = gr.Image(type="filepath")
         out_conf = gr.Image(type="filepath")
+        
+        # SHAP components
+        shap_summary = gr.HTML("<div id='shap-area'></div>")
+        shap_bar = gr.HTML("<div id='shap-area'></div>")
+        
+        # Model selection
+        gr.Markdown("## Model Selection")
+        lr_checkbox = gr.Checkbox(label="Logistic Regression", value=True)
+        rf_checkbox = gr.Checkbox(label="Random Forest", value=True) 
+        gb_checkbox = gr.Checkbox(label="Gradient Boosting", value=True)
+        xgb_checkbox = gr.Checkbox(label="XGBoost", value=False)
+        cat_checkbox = gr.Checkbox(label="CatBoost", value=False)
+        
+        # Options
+        gr.Markdown("## Options")
+        cv_folds = gr.Number(value=3, label="CV Folds (3-10)")
+        ensemble_size = gr.Number(value=3, label="Ensemble Size (2-5)") 
+        feature_selection = gr.Checkbox(label="Feature Selection", value=True)
+        mode_toggle = gr.Radio(choices=["Fast", "Full"], value="Fast", label="Mode")
+        
+        # Buttons
+        gr.Markdown("## Actions")
+        btn_train = gr.Button("Start Training")
+        btn_test = gr.Button("Test UI")
+        btn_shap = gr.Button("Compute SHAP")
+        
+        # ======================================================
+        # REGISTER ALL EVENT HANDLERS AT THE END OF BLOCKS CONTEXT
+        # This ensures all handlers are registered while the context
+        # is still active, which is critical for Gradio 4.31.0
+        # ======================================================
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Registering ALL button handlers in flat structure")
+        
+        # Register click handlers INSIDE the Blocks context but AFTER creating ALL components
+        preview_btn.click(
+            fn=preview_dataset_handler, 
+            inputs=[file_input], 
+            outputs=[dataset_preview]
+        )
+        
+        download_btn.click(
+            fn=download_dataset_handler, 
+            inputs=None, 
+            outputs=[download_log, dataset_preview]
+        )
+        
+        btn_train.click(
+            fn=train_streaming_handler,
+            inputs=[cv_folds, ensemble_size, feature_selection, lr_checkbox, rf_checkbox, gb_checkbox, xgb_checkbox, cat_checkbox, mode_toggle, file_input],
+            outputs=[out_scorecard, out_best_model, out_roc, out_conf, status_text, time_estimate, run_log, out_key_takeaways, progress_bar]
+        )
+        
+        btn_test.click(
+            fn=test_ui_handler,
+            outputs=[status_text, time_estimate]
+        )
+        
+        btn_shap.click(
+            fn=compute_shap_handler, 
+            outputs=[shap_summary, shap_bar]
+        )
+        
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: ALL click handlers registered successfully")
+        
+        # Try to load data on startup (directly instead of using demo.load)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Attempting to load initial data")
+        try:
+            df = load_telco_data()
+            dataset_preview.update(value=df.head(20))
+        except Exception as e:
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] WARNING: Initial data load failed: {e}")
+    
+    # Return the demo after all components and event handlers are registered
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Successfully created interface with all handlers")
+    return demo
 
-        # Wrap top header in a white card for contrast
-        gr.HTML("<div class='main-card'>")
-
-        # Header
-        gr.Markdown("# Enterprise ML Pipeline - Telco Churn Prediction")
-        gr.Markdown("AI Expert-Grade Machine Learning")
-
-    with gr.Row():
-        with gr.Column():
-            gr.Markdown("## Dataset Analysis")
-            gr.Markdown("Telco Churn Dataset: 7,043 customers, 42 features")
-            gr.Markdown("Target: 83%+ accuracy for churn prediction")
-
-            gr.Markdown("---")
-            gr.Markdown("## Approach & Positioning")
-            gr.Markdown(
-                "This demo demonstrates a full, production-minded ML pipeline for structured/tabular data.\n\n"
-                "What you'll see and why: \n"
+# -------------------------------
+# Main execution
+# -------------------------------
+if __name__ == "__main__":
+    demo = create_gradio_interface()
+    demo.launch(server_name="0.0.0.0", server_port=7860, share=False)
                 "- Data ingestion: accept CSV uploads or automatically fetch the canonical Telco dataset from Kaggle (Space secrets required).\n"
                 "- Feature engineering: domain-driven derived features (tenure buckets, charge ratios, service counts) so simple linear models and trees can learn robust signals.\n"
                 "- Model training: configurable selection of models (Logistic Regression, Random Forest, Gradient Boosting, XGBoost, CatBoost).\n"
@@ -2144,9 +2172,15 @@ def create_gradio_interface():
                         return pd.DataFrame()
 
                 # Hook into Gradio load so Spaces will execute the loader at startup
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Registering demo load handler")
-                demo.load(fn=_on_startup, inputs=None, outputs=[dataset_preview])
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Demo load handler registered")
+                # Just run the startup function directly instead of using demo.load
+                # which is also causing context issues in Gradio 4.31.0
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Running startup function directly")
+                try:
+                    preview_df = _on_startup()
+                    if not preview_df.empty:
+                        dataset_preview.update(value=preview_df)
+                except Exception as e:
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] ERROR in startup: {e}")
                 
                 # ======================================================
                 # REGISTER ALL EVENT HANDLERS AT THE END OF BLOCKS CONTEXT
