@@ -1900,9 +1900,9 @@ Cross-Validation:
                 else:
                     df = pd.read_csv(TELCO_CSV)
                 # show first 50 rows
-                return gr.DataFrame.update(value=df.head(50))
+                return df.head(50)
             except Exception:
-                return gr.DataFrame.update(value=pd.DataFrame())
+                return pd.DataFrame()
 
         # Register event handlers at the Blocks scope (must be inside the with-gr.Blocks context)
         preview_btn.click(fn=preview_dataset, inputs=[file_input], outputs=[dataset_preview])
@@ -1918,11 +1918,11 @@ Cross-Validation:
                         preview = df.head(20)
                     except Exception:
                         preview = pd.DataFrame()
-                    return msg, gr.DataFrame.update(value=preview)
+                    return msg, preview
                 else:
-                    return msg, gr.DataFrame.update(value=pd.DataFrame())
+                    return msg, pd.DataFrame()
             except Exception as e:
-                return f"Download error: {e}", gr.DataFrame.update(value=pd.DataFrame())
+                return f"Download error: {e}", pd.DataFrame()
 
         download_btn.click(fn=download_dataset, inputs=None, outputs=[download_log, dataset_preview])
 
@@ -1948,10 +1948,10 @@ Cross-Validation:
             # Try to load data via the same loader; returns a small preview or error
             try:
                 df = load_telco_data()
-                return gr.DataFrame.update(value=df.head(20))
+                return df.head(20)
             except Exception as e:
                 print(f"Startup dataset load failed: {e}")
-                return gr.DataFrame.update(value=pd.DataFrame())
+                return pd.DataFrame()
 
         # Hook into Gradio load so Spaces will execute the loader at startup
         demo.load(fn=_on_startup, inputs=None, outputs=[dataset_preview])
