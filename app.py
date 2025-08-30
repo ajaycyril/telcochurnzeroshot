@@ -1651,13 +1651,33 @@ def create_gradio_interface():
                 
                 gr.Markdown("---")
                 gr.Markdown("## Approach & Positioning")
-                gr.Markdown("This demo presents an enterprise-grade ML pipeline: structured feature engineering, stratified CV, efficient hyperparameter tuning, and explainability via SHAP. The `Fast` mode uses compact grids for quick demos and hosting limits; `Full` mode performs broader searches for production-ready tuning. Built by a hands-on ML engineer focused on reproducibility and operational readiness.")
+                gr.Markdown(
+                    "This demo demonstrates a full, production-minded ML pipeline for structured/tabular data.\n\n"
+                    "What you'll see and why: \n"
+                    "- Data ingestion: accept CSV uploads or automatically fetch the canonical Telco dataset from Kaggle (Space secrets required).\n"
+                    "- Feature engineering: domain-driven derived features (tenure buckets, charge ratios, service counts) so simple linear models and trees can learn robust signals.\n"
+                    "- Model training: configurable selection of models (Logistic Regression, Random Forest, Gradient Boosting, XGBoost, CatBoost).\n"
+                    "- Safe hosting defaults: `Fast` mode uses small hyperparameter grids and skips heavy libraries when not available; `Full` mode expands search when resources allow.\n"
+                    "- Explainability: SHAP summary and per-feature contributions so predictions are actionable and auditable.\n\n"
+                    "Design goals: reproducibility, clear decision records, and an educational narrative that explains tradeoffs (speed vs. accuracy, interpretability vs. capacity)."
+                )
                 
                 gr.Markdown("## ML Features")
-                gr.Markdown("- Advanced Feature Engineering")
-                gr.Markdown("- Hyperparameter Optimization")
-                gr.Markdown("- Ensemble Methods")
-                gr.Markdown("- SHAP Explainability")
+                gr.Markdown("- Advanced Feature Engineering (tenure groups, charge ratios, service interactions)")
+                gr.Markdown("- Stratified cross-validation & calibrated scoring")
+                gr.Markdown("- Hyperparameter search (safe grids in Fast mode, wider search in Full mode)")
+                gr.Markdown("- Optional tree boosters (XGBoost / CatBoost) when available")
+                gr.Markdown("- Ensemble via voting and simple stacking")
+                gr.Markdown("- Explainability via SHAP: global summary and per-sample contributions")
+
+                gr.Markdown("---")
+                gr.Markdown("## How to interpret the UI and outputs")
+                gr.Markdown(
+                    "- 'Status' updates stream key pipeline steps: data load, preprocessing, model search, evaluation.\n"
+                    "- 'Estimated Time' shows a coarse time heuristic based on selected models for transparency.\n"
+                    "- Use `Preview Dataset` to inspect uploaded or downloaded CSV before training.\n"
+                    "- After training, explore ROC and confusion plots to understand class tradeoffs; use SHAP to justify individual predictions for stakeholders."
+                )
                 
             with gr.Column():
                 gr.Markdown("## Configuration")
