@@ -1409,6 +1409,23 @@ def _call_train(selected_models, allow_install=True, fast=False, uploaded_file=N
         # Fall back to older signature
         return train_selected_models_only(selected_models, allow_install=allow_install, fast=fast)
 
+
+# Resilient alias: rebind the public name to a wrapper that tolerates both
+# the old and new signatures. This helps when a deployed runtime still
+# references a different implementation variant.
+_train_impl = train_selected_models_only
+
+def train_selected_models_only(selected_models, allow_install=False, fast=False, uploaded_file=None):
+    try:
+        return _train_impl(selected_models, allow_install=allow_install, fast=fast, uploaded_file=uploaded_file)
+    except TypeError:
+        # Older impl didn't accept uploaded_file kw; call without it
+        try:
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] WARNING: train_selected_models_only fallback used (no uploaded_file kw accepted)")
+        except Exception:
+            pass
+        return _train_impl(selected_models, allow_install=allow_install, fast=fast)
+
 def process_telco_data(allow_install=False):
     """
     Main function to process Telco data with all improvements.
