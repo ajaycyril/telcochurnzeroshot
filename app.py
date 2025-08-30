@@ -133,6 +133,26 @@ def kaggle_download_telco():
 
     # Try Python API first (works with Hugging Face secrets)
     try:
+        # If secrets are provided as environment variables, ensure kaggle.json exists
+        kaggle_user = os.environ.get("KAGGLE_USERNAME")
+        kaggle_key = os.environ.get("KAGGLE_KEY")
+        if kaggle_user and kaggle_key:
+            kaggle_dir = os.path.join(os.path.expanduser("~"), ".kaggle")
+            os.makedirs(kaggle_dir, exist_ok=True)
+            kaggle_json = os.path.join(kaggle_dir, "kaggle.json")
+            if not os.path.exists(kaggle_json):
+                try:
+                    with open(kaggle_json, "w") as fh:
+                        json.dump({"username": kaggle_user, "key": kaggle_key}, fh)
+                    # Set restrictive permissions where supported
+                    try:
+                        os.chmod(kaggle_json, 0o600)
+                    except Exception:
+                        pass
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] Wrote kaggle.json to {kaggle_json}")
+                except Exception as e:
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] Failed to write kaggle.json: {e}")
+
         from kaggle.api.kaggle_api_extended import KaggleApi
         api = KaggleApi()
         api.authenticate()
@@ -146,7 +166,19 @@ def kaggle_download_telco():
             return False, f"[{datetime.now().strftime('%H:%M:%S')}] Python API download failed - CSV not found"
             
     except ImportError:
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] Kaggle Python API not available, trying CLI...")
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Kaggle Python API not available, attempting to install kaggle package...")
+        # Try to install kaggle package and re-import
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "kaggle"], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+            from kaggle.api.kaggle_api_extended import KaggleApi  # noqa: E402
+            api = KaggleApi()
+            api.authenticate()
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Kaggle package installed and authenticated")
+            api.dataset_download_files(TELCO_KAGGLE_REF, path=".", unzip=True)
+            if os.path.exists(TELCO_CSV):
+                return True, f"[{datetime.now().strftime('%H:%M:%S')}] Downloaded via Python API after installing kaggle: {TELCO_CSV}"
+        except Exception:
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Failed to install or use kaggle Python package; falling back to CLI approach")
     except Exception as e:
         print(f"[{datetime.now().strftime('%H:%M:%S')}] Python API failed: {str(e)}")
         # Check if it's a credentials issue
@@ -193,12 +225,34 @@ def load_telco_data(uploaded_file=None):
         except Exception as e:
             raise FileNotFoundError(f"Failed to read uploaded file: {e}")
     else:
-        if not os.path.exists(TELCO_CSV):
+        # Check both current working directory and the directory where this script lives
+        possible_paths = [
+            os.path.abspath(TELCO_CSV),
+            os.path.join(os.path.dirname(__file__), TELCO_CSV),
+        ]
+
+        found_path = None
+        for p in possible_paths:
+            if os.path.exists(p):
+                found_path = p
+                break
+
+        if not found_path:
+            # Try Kaggle download as a last resort
             success, msg = kaggle_download_telco()
             if not success:
                 raise FileNotFoundError(f"Dataset not found: {TELCO_CSV}. {msg}")
-        df = pd.read_csv(TELCO_CSV)
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] Loaded dataset: {df.shape}")
+            # After download attempt, check again in common locations
+            for p in possible_paths:
+                if os.path.exists(p):
+                    found_path = p
+                    break
+
+        if not found_path:
+            raise FileNotFoundError(f"Dataset still not found after download attempt: checked {possible_paths}")
+
+        df = pd.read_csv(found_path)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Loaded dataset from: {found_path} shape={df.shape}")
 
     # Advanced feature engineering (best-effort - keep generic)
     df = engineer_features(df)
