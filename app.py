@@ -2074,26 +2074,13 @@ def create_gradio_interface():
         
                 # Controls
                 gr.Markdown("## Training")
-                # Create button first
+                # Create button without binding click handler
                 btn_train = gr.Button("Start Training")
-                # Then immediately register click handler in a separate statement
-                # This is crucial for compatibility with Gradio 4.31.0
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Registering train button click handler")
-                btn_train.click(
-                    fn=train_streaming_handler,
-                    inputs=[cv_folds, ensemble_size, feature_selection, lr_checkbox, rf_checkbox, gb_checkbox, xgb_checkbox, cat_checkbox, mode_toggle, file_input],
-                    outputs=[out_scorecard, out_best_model, out_roc, out_conf, status_text, time_estimate, run_log, out_key_takeaways, progress_bar]
-                )
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Train button click handler registered")
+                
+                # We'll register all event handlers at the end of the Blocks context
 
-                # Create button first
+                # Create button without binding click handler
                 btn_test = gr.Button("Test UI")
-                # Then immediately register click handler in a separate statement
-                # This is crucial for compatibility with Gradio 4.31.0
-                btn_test.click(
-                    fn=test_ui_handler,
-                    outputs=[status_text, time_estimate]
-                )
 
 
     # Run log (scrollable) to surface terminal output from training
@@ -2128,11 +2115,8 @@ def create_gradio_interface():
                         shap_summary = gr.HTML("<div id='shap-area'></div>")
                     with gr.Column():
                         shap_bar = gr.HTML("<div id='shap-area'></div>")
-                        btn_shap = gr.Button("Compute SHAP")
-                # Register SHAP compute handler immediately
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Registering SHAP button click handler")
-                btn_shap.click(fn=compute_shap_handler, outputs=[shap_summary, shap_bar])
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: SHAP click handler registered")                # Preview and download handlers are registered earlier next to their components.
+                        # Create button without binding click handler
+                        btn_shap = gr.Button("Compute SHAP")                # Preview and download handlers are registered earlier next to their components.
 
                 # Quick demo flow – concise and professional guidance for live demos
                 with gr.Row():
@@ -2163,6 +2147,34 @@ def create_gradio_interface():
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Registering demo load handler")
                 demo.load(fn=_on_startup, inputs=None, outputs=[dataset_preview])
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Demo load handler registered")
+                
+                # ======================================================
+                # REGISTER ALL EVENT HANDLERS AT THE END OF BLOCKS CONTEXT
+                # This ensures all handlers are registered while the context
+                # is still active, which is critical for Gradio 4.31.0
+                # ======================================================
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Registering ALL button click handlers at end of Blocks context")
+                
+                # Training button
+                btn_train.click(
+                    fn=train_streaming_handler,
+                    inputs=[cv_folds, ensemble_size, feature_selection, lr_checkbox, rf_checkbox, gb_checkbox, xgb_checkbox, cat_checkbox, mode_toggle, file_input],
+                    outputs=[out_scorecard, out_best_model, out_roc, out_conf, status_text, time_estimate, run_log, out_key_takeaways, progress_bar]
+                )
+                
+                # Test button
+                btn_test.click(
+                    fn=test_ui_handler,
+                    outputs=[status_text, time_estimate]
+                )
+                
+                # SHAP button
+                btn_shap.click(
+                    fn=compute_shap_handler, 
+                    outputs=[shap_summary, shap_bar]
+                )
+                
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: ALL click handlers registered successfully")
 
     # Critical: Make sure we're exiting the Blocks context correctly
     print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Exiting create_gradio_interface() and returning demo")
