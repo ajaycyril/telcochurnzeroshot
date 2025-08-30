@@ -1880,6 +1880,10 @@ def create_gradio_interface():
                 feature_selection = gr.Checkbox(label="Feature Selection")
                 preview_btn = gr.Button("Preview Dataset")
                 download_btn = gr.Button("Download dataset (Kaggle)")
+                # Register lightweight handlers immediately after button creation to
+                # ensure the Blocks context is active when .click() is called (older Gradio compatibility)
+                preview_btn.click(fn=preview_dataset, inputs=[file_input], outputs=[dataset_preview])
+                download_btn.click(fn=lambda: ("Download not started yet", pd.DataFrame()), inputs=None, outputs=[download_log, dataset_preview])
                 download_log = gr.Textbox(label="Download log", lines=6)
                 mode_toggle = gr.Radio(choices=["Fast", "Full"], value="Fast", label="Mode")
                 file_input = gr.File(file_count="single", file_types=['.csv'], label="Upload CSV (optional)")
@@ -2114,29 +2118,8 @@ Cross-Validation:
             except Exception:
                 return pd.DataFrame()
 
-        # Register event handlers at the Blocks scope (must be inside the with-gr.Blocks context)
-        # Define download handler here so it exists when registering events
-        def download_dataset():
-            # Run the kaggle downloader and capture the message
-            try:
-                success, msg = kaggle_download_telco()
-                if success:
-                    # return log and a small preview
-                    try:
-                        df = pd.read_csv(TELCO_CSV)
-                        preview = df.head(20)
-                    except Exception:
-                        preview = pd.DataFrame()
-                    return msg, preview
-                else:
-                    return msg, pd.DataFrame()
-            except Exception as e:
-                return f"Download error: {e}", pd.DataFrame()
-
-        preview_btn.click(fn=preview_dataset, inputs=[file_input], outputs=[dataset_preview])
-        download_btn.click(fn=download_dataset, inputs=None, outputs=[download_log, dataset_preview])
-
-        # Connect event handlers (registered inside Blocks context)
+        # Note: actual download handler is defined later; replace the placeholder when invoked.
+        # Connect event handlers close to their controls to avoid Blocks-context timing issues
         btn_train.click(
             fn=train_models,
             inputs=[cv_folds, ensemble_size, feature_selection, lr_checkbox, rf_checkbox, gb_checkbox, xgb_checkbox, cat_checkbox, mode_toggle, file_input],
