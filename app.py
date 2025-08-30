@@ -1760,126 +1760,107 @@ def create_gradio_interface():
     """
     print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Entering create_gradio_interface()")
     with gr.Blocks() as demo:
-        # Lightweight CSS polish for demo visuals
+        # Harmonized world-class theme (light cards on dark background)
         gr.HTML("""
-        <style>
-        :root{
-            --bg:#0f172a; /* deep navy */
-            --card:#0b1220;
-            --muted:#94a3b8;
-            --accent1:#7c3aed; /* purple */
-            --accent2:#06b6d4; /* teal */
-            --glass: rgba(255,255,255,0.03);
-        }
-        /* Page background and container */
-        .gradio-container { background: linear-gradient(180deg, #071029 0%, #07172a 60%); padding:28px; font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, 'Helvetica Neue', Arial; color: #e6eef8 }
-        .gr-block { max-width:1200px; margin: 0 auto; }
+    <style>
+    body, .gradio-container { background: #0f1724 !important; color: #0b1220 !important; font-family: Inter, 'Segoe UI', Roboto, Arial, sans-serif; }
 
-        /* Card look for columns and major panels */
-        .card { background: linear-gradient(180deg,var(--card), rgba(11,18,32,0.6)); border-radius: 12px; padding: 16px; box-shadow: 0 8px 30px rgba(2,6,23,0.6); border: 1px solid rgba(255,255,255,0.03); }
-        .panel { margin-bottom: 16px; }
+    /* Container cards and panels */
+    .main-card { background: #ffffff; border-radius: 14px; padding: 22px; box-shadow: 0 8px 30px rgba(2,6,23,0.08); margin-bottom: 18px; }
+    .results-card { background: #f6fbff; border-radius: 12px; padding: 18px; box-shadow: 0 4px 18px rgba(2,6,23,0.06); }
 
-        /* Buttons */
-        .gr-button { border-radius: 10px !important; background: linear-gradient(90deg,var(--accent1),#4f46e5) !important; color: white !important; border: none !important; padding:10px 14px !important; font-weight:600 !important; box-shadow: 0 10px 30px rgba(79,70,229,0.12); transition: transform .12s ease, box-shadow .12s ease; }
-        .gr-button:hover { transform: translateY(-2px); box-shadow: 0 16px 36px rgba(79,70,229,0.18); }
+    /* Buttons */
+    .gr-button { background: linear-gradient(90deg,#06b6d4 0%, #2563eb 100%) !important; color: white !important; border-radius: 10px !important; padding: 10px 14px !important; font-weight: 700 !important; box-shadow: 0 8px 24px rgba(37,99,235,0.12); }
+    .gr-button:hover { transform: translateY(-2px); }
 
-        /* Headings and markdown */
-        .gr-markdown h1, .gr-markdown h2 { color: #ffffff; text-shadow: 0 2px 10px rgba(0,0,0,0.6); }
-        .gr-markdown p, .gr-markdown li { color: var(--muted); }
+    /* Headings */
+    .gr-markdown h1, .gr-markdown h2, .gr-markdown h3 { color: #0b1220 !important; }
+    .gr-markdown p, .gr-markdown li { color: #334155 !important; }
 
-        /* Dataframe and images */
-        .gr-dataframe, .gr-image, .gr-markdown, .gr-textbox { background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.015)); border-radius: 10px; padding: 8px; }
-        table { border-collapse: collapse; }
-        table tr:hover { background: rgba(255,255,255,0.02); }
+    /* Dataframe and images */
+    .gr-dataframe, .gr-image, .gr-markdown, .gr-textbox { background: transparent; }
+    img { max-width:100% !important; height:auto !important; object-fit:contain !important; border-radius:10px; }
+    #shap-area img { background: #ffffff; padding:8px; border-radius:10px; box-shadow:0 6px 20px rgba(2,6,23,0.06); }
 
-        /* Progress bar */
-        .custom-progress { width:100%; background:rgba(255,255,255,0.03); border-radius:8px; padding:6px; }
-        .custom-progress .bar { display:block; height:30px; border-radius:6px; background:linear-gradient(90deg,var(--accent1),var(--accent2)); color:white; text-align:center; line-height:30px; font-weight:700; }
+    /* Run log */
+    textarea.gr-text-input { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', monospace !important; background:#0b1220 !important; color:#e6eef8 !important; border-radius:8px; padding:12px; }
 
-        /* Run log monospace */
-        textarea.gr-text-input { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', monospace !important; color:#e6eef8 !important; background:transparent !important; }
+    /* Key takeaways */
+    .key-takeaways { background: #ffffff; border-radius:10px; padding:14px; color:#0b1220; box-shadow:0 4px 16px rgba(2,6,23,0.06); }
 
-        /* SHAP and visuals sizing */
-        img { max-width: 100% !important; height: auto !important; object-fit: contain !important; }
-        #shap-area img, .gr-image img { max-height: 520px !important; width: auto !important; }
+    /* Progress */
+    .custom-progress { width:100%; background:#eef2ff; border-radius:8px; padding:6px; }
+    .custom-progress .bar { height:28px; border-radius:6px; background: linear-gradient(90deg,#06b6d4,#2563eb); color:white; text-align:center; font-weight:700; }
+    </style>
+    """)
 
-        /* Metric badges in markdown (rendered as inline code-like badges) */
-        .gr-markdown code.metric-badge { background: linear-gradient(90deg,var(--accent1),var(--accent2)); color:white; padding:6px 10px; border-radius:8px; font-weight:700; }
+    # Wrap top header in a white card for contrast
+    gr.HTML("<div class='main-card'>")
 
-        /* Small interactions */
-        .gr-row { gap: 14px; }
-        .gr-column { gap: 12px; }
-        .card .gr-button { width:100%; }
+    # Header
+    gr.Markdown("# Enterprise ML Pipeline - Telco Churn Prediction")
+    gr.Markdown("AI Expert-Grade Machine Learning")
 
-        /* Accent boxes for best model */
-        .best-model { border-left: 4px solid var(--accent1); padding-left:12px; }
-        </style>
-        """)
+    with gr.Row():
+        with gr.Column():
+            gr.Markdown("## Dataset Analysis")
+            gr.Markdown("Telco Churn Dataset: 7,043 customers, 42 features")
+            gr.Markdown("Target: 83%+ accuracy for churn prediction")
 
-        # Header
-        gr.Markdown("# Enterprise ML Pipeline - Telco Churn Prediction")
-        gr.Markdown("AI Expert-Grade Machine Learning")
-        
-        with gr.Row():
-            with gr.Column():
-                gr.Markdown("## Dataset Analysis")
-                gr.Markdown("Telco Churn Dataset: 7,043 customers, 42 features")
-                gr.Markdown("Target: 83%+ accuracy for churn prediction")
+            gr.Markdown("---")
+            gr.Markdown("## Approach & Positioning")
+            gr.Markdown(
+                "This demo demonstrates a full, production-minded ML pipeline for structured/tabular data.\n\n"
+                "What you'll see and why: \n"
+                "- Data ingestion: accept CSV uploads or automatically fetch the canonical Telco dataset from Kaggle (Space secrets required).\n"
+                "- Feature engineering: domain-driven derived features (tenure buckets, charge ratios, service counts) so simple linear models and trees can learn robust signals.\n"
+                "- Model training: configurable selection of models (Logistic Regression, Random Forest, Gradient Boosting, XGBoost, CatBoost).\n"
+                "- Safe hosting defaults: `Fast` mode uses small hyperparameter grids and skips heavy libraries when not available; `Full` mode expands search when resources allow.\n"
+                "- Explainability: SHAP summary and per-feature contributions so predictions are actionable and auditable.\n\n"
+                "Design goals: reproducibility, clear decision records, and an educational narrative that explains tradeoffs (speed vs. accuracy, interpretability vs. capacity)."
+            )
 
-                gr.Markdown("---")
-                gr.Markdown("## Approach & Positioning")
-                gr.Markdown(
-                    "This demo demonstrates a full, production-minded ML pipeline for structured/tabular data.\n\n"
-                    "What you'll see and why: \n"
-                    "- Data ingestion: accept CSV uploads or automatically fetch the canonical Telco dataset from Kaggle (Space secrets required).\n"
-                    "- Feature engineering: domain-driven derived features (tenure buckets, charge ratios, service counts) so simple linear models and trees can learn robust signals.\n"
-                    "- Model training: configurable selection of models (Logistic Regression, Random Forest, Gradient Boosting, XGBoost, CatBoost).\n"
-                    "- Safe hosting defaults: `Fast` mode uses small hyperparameter grids and skips heavy libraries when not available; `Full` mode expands search when resources allow.\n"
-                    "- Explainability: SHAP summary and per-feature contributions so predictions are actionable and auditable.\n\n"
-                    "Design goals: reproducibility, clear decision records, and an educational narrative that explains tradeoffs (speed vs. accuracy, interpretability vs. capacity)."
-                )
+            gr.Markdown("## ML Features")
+            gr.Markdown("- Advanced Feature Engineering (tenure groups, charge ratios, service interactions)")
+            gr.Markdown("- Stratified cross-validation & calibrated scoring")
+            gr.Markdown("- Hyperparameter search (safe grids in Fast mode, wider search in Full mode)")
+            gr.Markdown("- Optional tree boosters (XGBoost / CatBoost) when available")
+            gr.Markdown("- Ensemble via voting and simple stacking")
+            gr.Markdown("- Explainability via SHAP: global summary and per-sample contributions")
 
-                gr.Markdown("## ML Features")
-                gr.Markdown("- Advanced Feature Engineering (tenure groups, charge ratios, service interactions)")
-                gr.Markdown("- Stratified cross-validation & calibrated scoring")
-                gr.Markdown("- Hyperparameter search (safe grids in Fast mode, wider search in Full mode)")
-                gr.Markdown("- Optional tree boosters (XGBoost / CatBoost) when available")
-                gr.Markdown("- Ensemble via voting and simple stacking")
-                gr.Markdown("- Explainability via SHAP: global summary and per-sample contributions")
+            gr.Markdown("---")
+            gr.Markdown("## How to interpret the UI and outputs")
+            gr.Markdown(
+                "- 'Status' updates stream key pipeline steps: data load, preprocessing, model search, evaluation.\n"
+                "- 'Estimated Time' shows a coarse time heuristic based on selected models for transparency.\n"
+                "- Use `Preview Dataset` to inspect uploaded or downloaded CSV before training.\n"
+                "- After training, explore ROC and confusion plots to understand class tradeoffs; use SHAP to justify individual predictions for stakeholders."
+            )
 
-                gr.Markdown("---")
-                gr.Markdown("## How to interpret the UI and outputs")
-                gr.Markdown(
-                    "- 'Status' updates stream key pipeline steps: data load, preprocessing, model search, evaluation.\n"
-                    "- 'Estimated Time' shows a coarse time heuristic based on selected models for transparency.\n"
-                    "- Use `Preview Dataset` to inspect uploaded or downloaded CSV before training.\n"
-                    "- After training, explore ROC and confusion plots to understand class tradeoffs; use SHAP to justify individual predictions for stakeholders."
-                )
+            gr.Markdown("---")
+            gr.Markdown("## Getting started (step-by-step)")
+            gr.Markdown(
+                "Follow these steps to run the full ML flow and reproduce strong results on the Telco dataset:\n\n"
+                "1. Data source: By default, the app attempts to download the canonical Telco dataset from Kaggle. If you prefer, upload your CSV using 'Upload CSV'.\n"
+                "2. Preview / EDA: Click 'Preview Dataset' to inspect the top rows and ensure data types are correct.\n"
+                "3. Feature engineering: The pipeline constructs domain features (tenure groups, charge ratios, service counts). Inspect features locally if you wish to modify.\n"
+                "4. Mode selection: Use 'Fast' for quick iterations (safe grids and skipped heavy boosters). Switch to 'Full' for thorough tuning and including XGBoost/CatBoost.\n"
+                "5. Model selection: Select one or more models; combining models yields a more robust ensemble.\n"
+                "6. Train: Click 'Start Training' and follow the Status messages to watch progress.\n"
+                "7. Evaluate & explain: Inspect scorecard, ROC, confusion matrix; click 'Compute SHAP' for explainability.\n"
+                "8. Persist & export: Models are saved under the `/models` folder; download artifacts for production deployment."
+            )
 
-                gr.Markdown("---")
-                gr.Markdown("## Getting started (step-by-step)")
-                gr.Markdown(
-                    "Follow these steps to run the full ML flow and reproduce strong results on the Telco dataset:\n\n"
-                    "1. Data source: By default, the app attempts to download the canonical Telco dataset from Kaggle. If you prefer, upload your CSV using 'Upload CSV'.\n"
-                    "2. Preview / EDA: Click 'Preview Dataset' to inspect the top rows and ensure data types are correct.\n"
-                    "3. Feature engineering: The pipeline constructs domain features (tenure groups, charge ratios, service counts). Inspect features locally if you wish to modify.\n"
-                    "4. Mode selection: Use 'Fast' for quick iterations (safe grids and skipped heavy boosters). Switch to 'Full' for thorough tuning and including XGBoost/CatBoost.\n"
-                    "5. Model selection: Select one or more models; combining models yields a more robust ensemble.\n"
-                    "6. Train: Click 'Start Training' and follow the Status messages to watch progress.\n"
-                    "7. Evaluate & explain: Inspect scorecard, ROC, confusion matrix; click 'Compute SHAP' for explainability.\n"
-                    "8. Persist & export: Models are saved under the `/models` folder; download artifacts for production deployment."
-                )
-
-                gr.Markdown("## How to reach production-quality accuracy")
-                gr.Markdown(
-                    "Recommended path to maximize performance while remaining auditable:\n\n"
-                    "- Start in `Fast` mode to validate the pipeline.\n"
-                    "- Switch to `Full` mode and enable XGBoost/CatBoost in an environment where those packages are available.\n"
-                    "- Increase CV folds (5-10), expand search spaces, and consider RandomizedSearch/Optuna for faster coverage.\n"
-                    "- Use targeted feature selection (SelectKBest or model importances) to remove noisy columns.\n"
-                    "- Calibrate predicted probabilities (Platt or isotonic) for better thresholding.\n"
-                    "- Ensemble top performers and validate on a holdout set for robustness.\n"
-                )
+            gr.Markdown("## How to reach production-quality accuracy")
+            gr.Markdown(
+                "Recommended path to maximize performance while remaining auditable:\n\n"
+                "- Start in `Fast` mode to validate the pipeline.\n"
+                "- Switch to `Full` mode and enable XGBoost/CatBoost in an environment where those packages are available.\n"
+                "- Increase CV folds (5-10), expand search spaces, and consider RandomizedSearch/Optuna for faster coverage.\n"
+                "- Use targeted feature selection (SelectKBest or model importances) to remove noisy columns.\n"
+                "- Calibrate predicted probabilities (Platt or isotonic) for better thresholding.\n"
+                "- Ensemble top performers and validate on a holdout set for robustness.\n"
+            )
 
             with gr.Column():
                 gr.Markdown("## Configuration")
@@ -1919,6 +1900,8 @@ def create_gradio_interface():
 
         # Results
         gr.Markdown("## Results")
+        gr.HTML("</div>")
+        gr.HTML("<div class='results-card'>")
         # Plain-English guidance for non-technical viewers
         gr.Markdown(
             "### Quick read: What you just saw (plain English)\n"
