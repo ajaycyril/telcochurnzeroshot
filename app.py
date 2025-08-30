@@ -1395,6 +1395,16 @@ def train_selected_models_only(selected_models, allow_install=False, fast=False,
         traceback.print_exc()
         return {"success": False, "error": str(e)}
 
+
+# Compatibility wrapper: some deployed environments may have an older
+# version of this function without the `uploaded_file` parameter.
+def _call_train(selected_models, allow_install=True, fast=False, uploaded_file=None):
+    try:
+        return train_selected_models_only(selected_models, allow_install=allow_install, fast=fast, uploaded_file=uploaded_file)
+    except TypeError:
+        # Fall back to older signature
+        return train_selected_models_only(selected_models, allow_install=allow_install, fast=fast)
+
 def process_telco_data(allow_install=False):
     """
     Main function to process Telco data with all improvements.
@@ -1597,7 +1607,7 @@ def train_models_handler(cv_folds, ensemble_size, feature_selection, lr_selected
     fast_mode = (mode == "Fast")
 
     # start training
-    result = train_selected_models_only(selected_models, allow_install=True, fast=fast_mode, uploaded_file=uploaded_file)
+    result = _call_train(selected_models, allow_install=True, fast=fast_mode, uploaded_file=uploaded_file)
     if result.get("success"):
         TRAINED_RESULT = result
         best_row = result["scorecard"].iloc[0]
@@ -1844,7 +1854,7 @@ def create_gradio_interface():
             yield (gr.DataFrame(), "Starting... preparing data and environment", None, None, f"Status: Preparing - fast={fast_mode}", time_update)
 
             # Start training with ONLY selected models (high-level wrapper)
-            result = train_selected_models_only(selected_models, allow_install=True, fast=fast_mode, uploaded_file=uploaded_file)
+            result = _call_train(selected_models, allow_install=True, fast=fast_mode, uploaded_file=uploaded_file)
             if result.get("success"):
                 # Store for SHAP computation
                 demo.trained_result = result
