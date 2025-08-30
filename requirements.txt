@@ -1,0 +1,18 @@
+numpy>=1.21.0
+pandas>=1.3.0
+scikit-learn>=1.0.0
+matplotlib>=3.5.0
+gradio>=4.0.0
+shap>=0.40.0
+
+# Advanced ML libraries (optional but recommended)
+xgboost>=1.7.0
+# lightgbm>=3.3.0  # Commented out due to build issues on macOS
+catboost>=1.2.0
+
+# Additional utilities
+scipy>=1.7.0
+seaborn>=0.11.0
+
+# Kaggle API for dataset downloadss
+kaggle>=1.5.0

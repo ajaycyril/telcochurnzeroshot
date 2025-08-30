@@ -1,0 +1,1805 @@
+# app.py
+import os
+import sys
+import io
+import json
+import subprocess
+import zipfile
+from datetime import datetime
+import warnings
+# app.py
+import os
+import sys
+import io
+import json
+import subprocess
+import zipfile
+from datetime import datetime
+import warnings
+warnings.filterwarnings("ignore")
+
+import numpy as np
+import pandas as pd
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import seaborn as sns
+try:
+    from xgboost import XGBClassifier
+except Exception:
+    XGBClassifier = None
+try:
+    from catboost import CatBoostClassifier
+except Exception:
+    CatBoostClassifier = None
+
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder, StandardScaler, RobustScaler
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier, VotingClassifier, GradientBoostingClassifier
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import (
+    roc_auc_score, roc_curve, auc,
+    confusion_matrix, ConfusionMatrixDisplay,
+    classification_report, accuracy_score, f1_score, precision_score, recall_score
+)
+from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score, GridSearchCV, RandomizedSearchCV
+from sklearn.feature_selection import SelectKBest, f_classif
+from sklearn.utils.class_weight import compute_class_weight
+
+import shap
+
+import gradio as gr
+
+# -------------------------------
+# Constants / Defaultss
+# -------------------------------
+TELCO_KAGGLE_REF = "blastchar/telco-customer-churn"
+TELCO_ZIP = "telco-customer-churn.zip"
+TELCO_CSV = "WA_Fn-UseC_-Telco-Customer-Churn.csv"
+
+RANDOM_STATE = 42
+N_FOLDS = 5
+
+# -------------------------------
+# Utility: Optional installs
+# -------------------------------
+def ensure_optional_libs(allow_install):
+    available = {"xgboost": False, "lightgbm": False, "catboost": False}
+    try:
+        import xgboost  # noqa
+        available["xgboost"] = True
+    except Exception:
+        if allow_install:
+            try:
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "xgboost==1.7.6"])
+                import xgboost  # noqa
+                available["xgboost"] = True
+            except Exception:
+                pass
+    try:
+        import lightgbm  # noqa
+        available["lightgbm"] = True
+    except Exception:
+        if allow_install:
+            try:
+                print("Attempting to install LightGBM...")
+                # Try to install a pre-built wheel first
+                try:
+                    subprocess.check_call([sys.executable, "-m", "pip", "install", "lightgbm>=3.3.0"], 
+                                        timeout=60, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    import lightgbm  # noqa
+                    available["lightgbm"] = True
+                    print("LightGBM installed successfully!")
+                except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                    print("LightGBM installation failed or timed out, continuing without it...")
+                    available["lightgbm"] = False
+            except Exception:
+                print("LightGBM installation failed, continuing without it...")
+                available["lightgbm"] = False
+    try:
+        import catboost  # noqa
+        available["catboost"] = True
+    except Exception:
+        if allow_install:
+            try:
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "catboost==1.2.5"])
+                import catboost  # noqa
+                available["catboost"] = True
+            except Exception:
+                pass
+    return available
+
+# Global availability cache used at runtime to avoid NameError
+AVAILABLE = None
+
+# -------------------------------
+# Kaggle download
+# -------------------------------
+def kaggle_download_telco():
+    """
+    Try to download the Telco dataset via Kaggle Python API or CLI.
+    Works with both Hugging Face secrets and local Kaggle CLI.
+    """
+    # Debug: Show environment variables for Hugging Face debugging
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] Debug: Checking Kaggle credentials...")
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] KAGGLE_USERNAME present: {'KAGGLE_USERNAME' in os.environ}")
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] KAGGLE_KEY present: {'KAGGLE_KEY' in os.environ}")
+    
+    # already present?
+    if os.path.exists(TELCO_CSV):
+        return True, f"[{datetime.now().strftime('%H:%M:%S')}] Found existing CSV: {TELCO_CSV}"
+
+    # Try Python API first (works with Hugging Face secrets)
+    try:
+        from kaggle.api.kaggle_api_extended import KaggleApi
+        api = KaggleApi()
+        api.authenticate()
+        
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Using Kaggle Python API...")
+        api.dataset_download_files(TELCO_KAGGLE_REF, path=".", unzip=True)
+        
+        if os.path.exists(TELCO_CSV):
+            return True, f"[{datetime.now().strftime('%H:%M:%S')}] Downloaded via Python API: {TELCO_CSV}"
+        else:
+            return False, f"[{datetime.now().strftime('%H:%M:%S')}] Python API download failed - CSV not found"
+            
+    except ImportError:
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Kaggle Python API not available, trying CLI...")
+    except Exception as e:
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Python API failed: {str(e)}")
+        # Check if it's a credentials issue
+        if "No API found" in str(e) or "authentication" in str(e).lower():
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Authentication failed - check KAGGLE_USERNAME and KAGGLE_KEY environment variables in Hugging Face Space secrets")
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Current environment: KAGGLE_USERNAME={'KAGGLE_USERNAME' in os.environ}, KAGGLE_KEY={'KAGGLE_KEY' in os.environ}")
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Trying CLI as fallback...")
+
+    # Fallback to CLI
+    try:
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Trying Kaggle CLI...")
+        cmd = ["kaggle", "datasets", "download", "-d", TELCO_KAGGLE_REF, "-p", "."]
+        subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+        
+        # unzip
+        if os.path.exists(TELCO_ZIP):
+            with zipfile.ZipFile(TELCO_ZIP, "r") as zip_ref:
+                zip_ref.extractall(".")
+            os.remove(TELCO_ZIP)
+            
+        if os.path.exists(TELCO_CSV):
+            return True, f"[{datetime.now().strftime('%H:%M:%S')}] Downloaded via CLI: {TELCO_CSV}"
+        else:
+            return False, f"[{datetime.now().strftime('%H:%M:%S')}] CLI download failed - CSV not found after extraction"
+            
+    except subprocess.CalledProcessError:
+        return False, f"[{datetime.now().strftime('%H:%M:%S')}] Kaggle CLI failed. Please ensure kaggle is installed and configured."
+    except Exception as e:
+        return False, f"[{datetime.now().strftime('%H:%M:%S')}] Download error: {str(e)}"
+    
+    # If both methods failed, provide clear error message
+    return False, f"[{datetime.now().strftime('%H:%M:%S')}] Both Kaggle methods failed. Please check your Kaggle credentials in Hugging Face Space secrets (KAGGLE_USERNAME and KAGGLE_KEY)."
+
+# -------------------------------
+# Data loading & preprocessing
+# -------------------------------
+def load_telco_data(uploaded_file=None):
+    """Load dataset. If uploaded_file (path-like) is provided, use it; otherwise fall back to the local Telco CSV or try Kaggle."""
+    # If user uploaded a CSV via UI, prefer it
+    if uploaded_file:
+        try:
+            df = pd.read_csv(uploaded_file)
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Loaded uploaded dataset: {df.shape}")
+        except Exception as e:
+            raise FileNotFoundError(f"Failed to read uploaded file: {e}")
+    else:
+        if not os.path.exists(TELCO_CSV):
+            success, msg = kaggle_download_telco()
+            if not success:
+                raise FileNotFoundError(f"Dataset not found: {TELCO_CSV}. {msg}")
+        df = pd.read_csv(TELCO_CSV)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Loaded dataset: {df.shape}")
+
+    # Advanced feature engineering (best-effort - keep generic)
+    df = engineer_features(df)
+    return df
+
+def engineer_features(df):
+    """
+    Advanced feature engineering based on top Kaggle solutions.
+    """
+    df = df.copy()
+    
+    # Handle TotalCharges - convert to numeric and fill missing values
+    df['TotalCharges'] = pd.to_numeric(df['TotalCharges'], errors='coerce')
+    
+    # Fill missing TotalCharges with MonthlyCharges (new customers)
+    df['TotalCharges'].fillna(df['MonthlyCharges'], inplace=True)
+    
+    # Create ratio features
+    df['MonthlyToTotalRatio'] = df['MonthlyCharges'] / (df['TotalCharges'] + 1e-8)
+    df['ContractValue'] = df['MonthlyCharges'] * df['Contract'].map({'Month-to-month': 1, 'One year': 12, 'Two year': 24})
+    
+    # Create interaction features
+    df['InternetService_Contract'] = df['InternetService'] + '_' + df['Contract']
+    df['PaymentMethod_Contract'] = df['PaymentMethod'] + '_' + df['Contract']
+    
+    # Create tenure-based features
+    df['TenureGroup'] = pd.cut(df['tenure'], bins=[0, 12, 24, 48, 72, 100], labels=['0-1y', '1-2y', '2-4y', '4-6y', '6y+'])
+    df['IsNewCustomer'] = (df['tenure'] <= 1).astype(int)
+    df['IsLongTermCustomer'] = (df['tenure'] >= 24).astype(int)
+    
+    # Create charge-based features
+    df['HighSpender'] = (df['MonthlyCharges'] > df['MonthlyCharges'].quantile(0.75)).astype(int)
+    df['LowSpender'] = (df['MonthlyCharges'] < df['MonthlyCharges'].quantile(0.25)).astype(int)
+    
+    # Create service count features
+    service_cols = ['PhoneService', 'MultipleLines', 'InternetService', 'OnlineSecurity', 
+                   'OnlineBackup', 'DeviceProtection', 'TechSupport', 'StreamingTV', 'StreamingMovies']
+    df['TotalServices'] = df[service_cols].apply(lambda x: (x != 'No').sum(), axis=1)
+    df['InternetServices'] = df[['OnlineSecurity', 'OnlineBackup', 'DeviceProtection', 'TechSupport', 'StreamingTV', 'StreamingMovies']].apply(
+        lambda x: (x != 'No').sum(), axis=1)
+    
+    # Create customer value features
+    df['CustomerValue'] = df['MonthlyCharges'] * df['tenure']
+    df['ValuePerTenure'] = df['CustomerValue'] / (df['tenure'] + 1e-8)
+    
+    # Handle categorical variables with more sophisticated encoding
+    df['Contract_Monthly'] = (df['Contract'] == 'Month-to-month').astype(int)
+    df['Contract_Yearly'] = (df['Contract'] == 'One year').astype(int)
+    df['Contract_TwoYear'] = (df['Contract'] == 'Two year').astype(int)
+    
+    df['PaymentMethod_Electronic'] = df['PaymentMethod'].isin(['Electronic check', 'Mailed check']).astype(int)
+    df['PaymentMethod_Auto'] = df['PaymentMethod'].isin(['Bank transfer (automatic)', 'Credit card (automatic)']).astype(int)
+    
+    # Create binary features for key services
+    df['HasInternet'] = (df['InternetService'] != 'No').astype(int)
+    df['HasPhone'] = (df['PhoneService'] == 'Yes').astype(int)
+    df['HasMultipleLines'] = (df['MultipleLines'] == 'Yes').astype(int)
+    
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] Feature engineering complete. New shape: {df.shape}")
+    return df
+
+def get_preprocessor(df):
+    """
+    Create advanced preprocessor with feature selection.
+    """
+    # Identify numeric and categorical columns
+    numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns.tolist()
+    categorical_cols = df.select_dtypes(include=['object']).columns.tolist()
+    
+    # Remove target and ID columns
+    numeric_cols = [col for col in numeric_cols if col not in ['Churn', 'customerID']]
+    categorical_cols = [col for col in categorical_cols if col not in ['Churn', 'customerID']]
+    
+    # Numeric pipeline with robust scaling
+    num_pipe = Pipeline(steps=[
+        ("impute", SimpleImputer(strategy="median")),
+        ("scale", RobustScaler())
+    ])
+    
+    # Categorical pipeline with OHE
+    cat_pipe = Pipeline(steps=[
+        ("impute", SimpleImputer(strategy="most_frequent")),
+        ("ohe", OneHotEncoder(handle_unknown="ignore", sparse_output=False))
+    ])
+    
+    # Combine transformers - use column names as they will be preserved in the pipeline
+    pre = ColumnTransformer(
+        transformers=[
+            ("num", num_pipe, numeric_cols),
+            ("cat", cat_pipe, categorical_cols)
+        ],
+        remainder="drop"
+    )
+    
+    return pre, numeric_cols, categorical_cols
+
+def split_xy(df):
+    """
+    Split data into features and target with stratified sampling.
+    """
+    # Map target
+    if "Churn" not in df.columns:
+        raise ValueError("Column 'Churn' not found in dataset.")
+    y = df["Churn"].map({"Yes": 1, "No": 0})
+    if y.isna().any():
+        raise ValueError("Target 'Churn' contains unexpected values. Expected 'Yes'/'No'.")
+
+    # Drop ID & target to form X
+    drop_cols = [c for c in ["Churn", "customerID"] if c in df.columns]
+    X = df.drop(columns=drop_cols, errors="ignore")
+    
+    # Use stratified split for better representation
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=RANDOM_STATE, stratify=y
+    )
+    
+    # Ensure X_train and X_test remain as DataFrames with column names
+    X_train = pd.DataFrame(X_train, columns=X.columns)
+    X_test = pd.DataFrame(X_test, columns=X.columns)
+    
+    return X_train, X_test, y_train, y_test
+
+# -------------------------------
+# Advanced Modeling with Hyperparameter Tuning
+# -------------------------------
+# The full, modern `get_tuned_models_selected` implementation (with `fast` support)
+# lives later in the file. The older duplicate was removed to avoid confusion.
+
+def get_tuned_models(preprocessor, X_train, y_train):
+    """
+    Returns list of (name, pipeline) tuples with hyperparameter tuning.
+    """
+    models = []
+    
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] 🚀 Starting hyperparameter tuning for all models...")
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] 📊 Training data shape: {X_train.shape}, Target distribution: {np.bincount(y_train)}")
+    
+    # Calculate class weights for imbalanced data
+    class_weights = compute_class_weight('balanced', classes=np.unique(y_train), y=y_train)
+    class_weight_dict = dict(zip(np.unique(y_train), class_weights))
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] ⚖️ Class weights calculated: {class_weight_dict}")
+    
+    # Logistic Regression with tuning
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔍 Tuning Logistic Regression...")
+    lr_param_grid = {
+        'clf__C': [0.01, 0.1, 1.0, 10.0, 100.0],
+        'clf__penalty': ['l1', 'l2'],
+        'clf__solver': ['liblinear', 'saga'],
+        'clf__class_weight': ['balanced', None]
+    }
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] 📋 LR Grid: {len(lr_param_grid['clf__C'])} × {len(lr_param_grid['clf__penalty'])} × {len(lr_param_grid['clf__solver'])} × {len(lr_param_grid['clf__class_weight'])} = {len(lr_param_grid['clf__C']) * len(lr_param_grid['clf__penalty']) * len(lr_param_grid['clf__solver']) * len(lr_param_grid['clf__class_weight'])} combinations")
+
+    lr_base = Pipeline(steps=[
+        ("pre", preprocessor),
+        ("clf", LogisticRegression(max_iter=2000))
+    ])
+    
+    lr_tuned = GridSearchCV(
+        lr_base, lr_param_grid, cv=3, scoring='roc_auc', 
+        n_jobs=-1
+    )
+    lr_tuned.fit(X_train, y_train)
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ Logistic Regression tuned! Best CV AUC: {lr_tuned.best_score_:.4f}")
+    models.append(("LogisticRegression", lr_tuned.best_estimator_))
+
+    # Random Forest with tuning
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] 🌲 Tuning Random Forest...")
+    rf_param_grid = {
+        'clf__n_estimators': [300, 500, 700],
+        'clf__max_depth': [8, 12, 16, None],
+        'clf__min_samples_split': [2, 5, 10],
+        'clf__min_samples_leaf': [1, 2, 4],
+        'clf__class_weight': ['balanced', 'balanced_subsample']
+    }
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] 📋 RF Grid: {len(rf_param_grid['clf__n_estimators'])} × {len(rf_param_grid['clf__max_depth'])} × {len(rf_param_grid['clf__min_samples_split'])} × {len(rf_param_grid['clf__min_samples_leaf'])} × {len(rf_param_grid['clf__class_weight'])} = {len(rf_param_grid['clf__n_estimators']) * len(rf_param_grid['clf__max_depth']) * len(rf_param_grid['clf__min_samples_split']) * len(rf_param_grid['clf__min_samples_leaf']) * len(rf_param_grid['clf__class_weight'])} combinations")
+
+    rf_base = Pipeline(steps=[
+        ("pre", preprocessor),
+        ("clf", RandomForestClassifier(n_jobs=-1))
+    ])
+
+    rf_tuned = GridSearchCV(
+        rf_base, rf_param_grid, cv=3, scoring='roc_auc', 
+        n_jobs=-1
+    )
+    rf_tuned.fit(X_train, y_train)
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ Random Forest tuned! Best CV AUC: {rf_tuned.best_score_:.4f}")
+    models.append(("RandomForest", rf_tuned.best_estimator_))
+
+    # Gradient Boosting
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] 📈 Tuning Gradient Boosting...")
+    gb_param_grid = {
+        'clf__n_estimators': [200, 400, 600],
+        'clf__learning_rate': [0.01, 0.05, 0.1],
+        'clf__max_depth': [3, 5, 7],
+        'clf__subsample': [0.8, 0.9, 1.0]
+    }
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] 📋 GB Grid: {len(gb_param_grid['clf__n_estimators'])} × {len(gb_param_grid['clf__learning_rate'])} × {len(gb_param_grid['clf__max_depth'])} × {len(gb_param_grid['clf__subsample'])} = {len(gb_param_grid['clf__n_estimators']) * len(gb_param_grid['clf__learning_rate']) * len(gb_param_grid['clf__max_depth']) * len(gb_param_grid['clf__subsample'])} combinations")
+
+    gb_base = Pipeline(steps=[
+        ("pre", preprocessor),
+        ("clf", GradientBoostingClassifier())
+    ])
+
+    gb_tuned = GridSearchCV(
+        gb_base, gb_param_grid, cv=3, scoring='roc_auc', 
+        n_jobs=-1
+    )
+    gb_tuned.fit(X_train, y_train)
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ Gradient Boosting tuned! Best CV AUC: {gb_tuned.best_score_:.4f}")
+    models.append(("GradientBoosting", gb_tuned.best_estimator_))
+
+    # CatBoost with tuning
+    try:
+        from catboost import CatBoostClassifier
+        cb_param_grid = {
+            'clf__iterations': [400, 600, 800],
+            'clf__learning_rate': [0.03, 0.05, 0.1],
+            'clf__depth': [4, 6, 8],
+            'clf__l2_leaf_reg': [1, 3, 5, 7]
+        }
+        
+        cb_base = Pipeline(steps=[
+            ("pre", preprocessor),
+            ("clf", CatBoostClassifier(
+                loss_function="Logloss",
+                eval_metric="AUC",
+                verbose=False
+            ))
+        ])
+        
+        cb_tuned = GridSearchCV(
+            cb_base, cb_param_grid, cv=3, scoring='roc_auc', 
+            n_jobs=-1
+        )
+        cb_tuned.fit(X_train, y_train)
+        models.append(("CatBoost", cb_tuned.best_estimator_))
+    except Exception:
+        pass
+
+    # XGBoost with tuning
+    try:
+        from xgboost import XGBClassifier
+        xgb_param_grid = {
+            'clf__n_estimators': [400, 600, 800],
+            'clf__max_depth': [3, 5, 7],
+            'clf__learning_rate': [0.01, 0.05, 0.1],
+            'clf__subsample': [0.8, 0.9, 1.0],
+            'clf__colsample_bytree': [0.7, 0.8, 0.9]
+        }
+        
+        xgb_base = Pipeline(steps=[
+            ("pre", preprocessor),
+            ("clf", XGBClassifier(
+                scale_pos_weight=len(y_train[y_train==0])/len(y_train[y_train==1]),
+                n_jobs=-1,
+                tree_method="hist",
+                eval_metric="logloss"
+            ))
+        ])
+        
+        xgb_tuned = GridSearchCV(
+            xgb_base, xgb_param_grid, cv=3, scoring='roc_auc', 
+            n_jobs=-1
+        )
+        xgb_tuned.fit(X_train, y_train)
+        models.append(("XGBoost", xgb_tuned.best_estimator_))
+    except Exception:
+        pass
+
+    # LightGBM with tuning
+    try:
+        from lightgbm import LGBMClassifier
+        lgbm_param_grid = {
+            'clf__n_estimators': [400, 600, 800],
+            'clf__max_depth': [3, 5, 7, -1],
+            'clf__learning_rate': [0.01, 0.05, 0.1],
+            'clf__subsample': [0.8, 0.9, 1.0],
+            'clf__colsample_bytree': [0.7, 0.8, 0.9]
+        }
+        
+        lgbm_base = Pipeline(steps=[
+            ("pre", preprocessor),
+            ("clf", LGBMClassifier(
+                class_weight='balanced',
+                n_jobs=-1,
+                verbose=-1
+            ))
+        ])
+        
+        lgbm_tuned = GridSearchCV(
+            lgbm_base, lgbm_param_grid, cv=3, scoring='roc_auc', 
+            n_jobs=-1
+        )
+        lgbm_tuned.fit(X_train, y_train)
+        models.append(("LightGBM", lgbm_tuned.best_estimator_))
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] LightGBM model added successfully")
+    except Exception as e:
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] LightGBM not available: {e}")
+        pass
+
+    return models
+
+def create_ensemble_model(models, preprocessor, X_train, y_train):
+    """
+    Create a voting ensemble from the best models.
+    """
+    # Get the top 3 models by CV performance
+    cv_scores = []
+    for name, model in models:
+        cv_auc = cross_val_score(model, X_train, y_train, scoring="roc_auc", cv=3, n_jobs=-1)
+        cv_scores.append((name, model, cv_auc.mean()))
+    
+    cv_scores.sort(key=lambda x: x[2], reverse=True)
+    top_models = cv_scores[:3]
+    
+    # Create voting classifier
+    ensemble = VotingClassifier(
+        estimators=[(name, model) for name, model, _ in top_models],
+        voting='soft'
+    )
+    
+    # Fit ensemble directly (don't wrap in pipeline to avoid ColumnTransformer issues)
+    ensemble.fit(X_train, y_train)
+    
+    models.append(("Ensemble", ensemble))
+    return models
+
+def evaluate_models(X_train, y_train, X_test, y_test, models):
+    """
+    Advanced evaluation with multiple metrics and ensemble creation.
+    """
+    results = []
+    trained = {}
+    fprs, tprs, aucs = [], [], []
+    names_for_roc = []
+
+    skf = StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=RANDOM_STATE)
+
+    # CV first, pick best by mean CV AUC
+    cv_auc_by_model = []
+    for name, pipe in models:
+        cv_auc = cross_val_score(pipe, X_train, y_train, scoring="roc_auc", cv=skf, n_jobs=-1)
+        cv_auc_by_model.append((name, cv_auc.mean(), cv_auc.std()))
+
+    # Sort by CV AUC
+    cv_auc_by_model.sort(key=lambda t: t[1], reverse=True)
+    
+    # Fit all models
+    for name, pipe in models:
+        pipe.fit(X_train, y_train)
+        trained[name] = pipe
+        
+        # Get predictions
+        if hasattr(pipe[-1], "predict_proba"):
+            y_proba = pipe.predict_proba(X_test)[:, 1]
+        else:
+            if hasattr(pipe[-1], "decision_function"):
+                raw = pipe.decision_function(X_test)
+                y_proba = (raw - raw.min()) / (raw.max() - raw.min() + 1e-9)
+            else:
+                y_proba = np.zeros_like(y_test, dtype=float)
+
+        y_pred = (y_proba >= 0.5).astype(int)
+
+        # Calculate comprehensive metrics
+        test_auc = roc_auc_score(y_test, y_proba)
+        acc = accuracy_score(y_test, y_pred)
+        f1 = f1_score(y_test, y_pred)
+        precision = precision_score(y_test, y_pred)
+        recall = recall_score(y_test, y_pred)
+
+        cv_mean = next((m for n, m, s in cv_auc_by_model if n == name), np.nan)
+        cv_std = next((s for n, m, s in cv_auc_by_model if n == name), np.nan)
+
+        results.append({
+            "Model": name,
+            "CV AUC Mean": round(cv_mean, 4),
+            "CV AUC Std": round(cv_std, 4),
+            "Test AUC": round(test_auc, 4),
+            "Test Accuracy": round(acc, 4),
+            "Test F1": round(f1, 4),
+            "Test Precision": round(precision, 4),
+            "Test Recall": round(recall, 4),
+        })
+
+        fpr, tpr, _ = roc_curve(y_test, y_proba)
+        fprs.append(fpr); tprs.append(tpr)
+        aucs.append(auc(fpr, tpr))
+        names_for_roc.append(name)
+
+    # Sort by test accuracy for final ranking
+    scorecard_df = pd.DataFrame(results).sort_values("Test Accuracy", ascending=False).reset_index(drop=True)
+
+    # ROC plot (all models)
+    roc_path = f"roc_all_{datetime.now().strftime('%H%M%S')}.png"
+    plt.figure(figsize=(10, 8))
+    for fpr, tpr, name in zip(fprs, tprs, names_for_roc):
+        plt.plot(fpr, tpr, label=f"{name} (AUC={auc(fpr,tpr):.3f})")
+    plt.plot([0, 1], [0, 1], "k--")
+    plt.xlabel("False Positive Rate"); plt.ylabel("True Positive Rate"); plt.title("ROC Curves (Test)")
+    plt.legend(loc="lower right")
+    plt.tight_layout()
+    plt.savefig(roc_path, dpi=130)
+    plt.close()
+
+    # Confusion matrix (best by test accuracy)
+    best_row = scorecard_df.iloc[0]
+    best_name = best_row["Model"]
+    best_pipe = trained[best_name]
+    
+    if hasattr(best_pipe[-1], "predict_proba"):
+        best_proba = best_pipe.predict_proba(X_test)[:, 1]
+    else:
+        if hasattr(best_pipe[-1], "decision_function"):
+            raw = best_pipe[-1].decision_function(X_test)
+            best_proba = (raw - raw.min()) / (raw.max() - raw.min() + 1e-9)
+        else:
+            best_proba = np.zeros_like(y_test, dtype=float)
+    
+    best_pred = (best_proba >= 0.5).astype(int)
+
+    conf = confusion_matrix(y_test, best_pred)
+    conf_path = f"confusion_best_{datetime.now().strftime('%H%M%S')}.png"
+    disp = ConfusionMatrixDisplay(confusion_matrix=conf)
+    fig, ax = plt.subplots(figsize=(6, 6))
+    disp.plot(ax=ax, cmap="Blues", colorbar=False)
+    ax.set_title(f"Confusion Matrix (Best: {best_name})")
+    plt.tight_layout()
+    plt.savefig(conf_path, dpi=130)
+    plt.close()
+
+    return scorecard_df, roc_path, conf_path, best_name, trained
+
+# -------------------------------
+# SHAP Explainability
+# -------------------------------
+def compute_shap_images(trained_pipe, preprocessor, X_sample, feature_names_out, shap_sample=100):
+    """
+    Returns list of image paths for SHAP (summary & bar). If fails, returns [].
+    """
+    paths = []
+    try:
+        try:
+            import shap
+        except Exception:
+            print("shap library not available; skipping SHAP plots")
+            return []
+
+        # Transform X through preprocessor so SHAP sees the exact model input
+        X_trans = preprocessor.transform(X_sample)
+        model = trained_pipe[-1]
+
+        # Cap sample size
+        n_sample = min(shap_sample, X_trans.shape[0])
+
+        # Choose explainer
+        explainer = None
+        try:
+            if hasattr(model, "get_booster") or hasattr(model, "feature_importances_") or 'xgb' in type(model).__name__.lower() or 'catboost' in type(model).__name__.lower():
+                explainer = shap.TreeExplainer(model)
+            else:
+                # Fallback: use KernelExplainer on a small background sample
+                background = X_trans[: max(20, n_sample)]
+                explainer = shap.KernelExplainer(model.predict, background)
+        except Exception:
+            # Last-resort: try TreeExplainer, then give up
+            try:
+                explainer = shap.TreeExplainer(model)
+            except Exception:
+                print("Failed to construct SHAP explainer for model")
+                return []
+
+        # Compute SHAP values
+        shap_values = explainer.shap_values(X_trans[:n_sample])
+
+        # Handle multi-output case (common for classification)
+        if isinstance(shap_values, list) and len(shap_values) > 1:
+            shap_values = shap_values[1]
+
+        # Summary plot
+        summary_path = f"shap_summary_{datetime.now().strftime('%H%M%S')}.png"
+        plt.figure(figsize=(10, 8))
+        shap.summary_plot(shap_values, X_trans[:n_sample], feature_names=feature_names_out, show=False)
+        plt.tight_layout()
+        plt.savefig(summary_path, dpi=130, bbox_inches='tight')
+        plt.close()
+        paths.append(summary_path)
+
+        # Bar plot
+        bar_path = f"shap_bar_{datetime.now().strftime('%H%M%S')}.png"
+        plt.figure(figsize=(10, 8))
+        shap.summary_plot(shap_values, X_trans[:n_sample], feature_names=feature_names_out, plot_type="bar", show=False)
+        plt.tight_layout()
+        plt.savefig(bar_path, dpi=130, bbox_inches='tight')
+        plt.close()
+        paths.append(bar_path)
+
+    except Exception as exc:
+        print(f"SHAP computation failed: {exc}")
+        return []
+
+    return paths
+
+    if "Churn" not in df.columns:
+        raise ValueError("Column 'Churn' not found in dataset.")
+    y = df["Churn"].map({"Yes": 1, "No": 0})
+    if y.isna().any():
+        raise ValueError("Target 'Churn' contains unexpected values. Expected 'Yes'/'No'.")
+
+    # Drop ID & target to form X
+    drop_cols = [c for c in ["Churn", "customerID"] if c in df.columns]
+    X = df.drop(columns=drop_cols, errors="ignore")
+    
+    # Use stratified split for better representation
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=RANDOM_STATE, stratify=y
+    )
+    
+    # Ensure X_train and X_test remain as DataFrames with column names
+    X_train = pd.DataFrame(X_train, columns=X.columns)
+    X_test = pd.DataFrame(X_test, columns=X.columns)
+    
+    return X_train, X_test, y_train, y_test
+
+# -------------------------------
+# Advanced Modeling with Hyperparameter Tuning
+# -------------------------------
+def get_tuned_models_selected(preprocessor, X_train, y_train, selected_models, fast=False):
+    """
+    Returns list of (name, pipeline) tuples with hyperparameter tuning for SELECTED models only.
+    """
+    models = []
+    
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] 🚀 Starting hyperparameter tuning for selected models: {selected_models}")
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] 📊 Training data shape: {X_train.shape}, Target distribution: {np.bincount(y_train)}")
+    
+    # Calculate class weights for imbalanced data
+    class_weights = compute_class_weight('balanced', classes=np.unique(y_train), y=y_train)
+    class_weight_dict = dict(zip(np.unique(y_train), class_weights))
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] ⚖️ Class weights calculated: {class_weight_dict}")
+    
+    # Only train the selected models
+    if "Logistic Regression" in selected_models:
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔍 Tuning Logistic Regression...")
+        if fast:
+            lr_param_grid = {'clf__C': [0.1, 1.0], 'clf__penalty': ['l2'], 'clf__solver': ['liblinear'], 'clf__class_weight': ['balanced', None]}
+        else:
+            lr_param_grid = {
+                'clf__C': [0.01, 0.1, 1.0, 10.0, 100.0],
+                'clf__penalty': ['l1', 'l2'],
+                'clf__solver': ['liblinear', 'saga'],
+                'clf__class_weight': ['balanced', None]
+            }
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 📋 LR Grid: {len(lr_param_grid['clf__C'])} × {len(lr_param_grid['clf__penalty'])} × {len(lr_param_grid['clf__solver'])} × {len(lr_param_grid['clf__class_weight'])} = {len(lr_param_grid['clf__C']) * len(lr_param_grid['clf__penalty']) * len(lr_param_grid['clf__solver']) * len(lr_param_grid['clf__class_weight'])} combinations")
+        
+        lr_base = Pipeline(steps=[
+            ("pre", preprocessor),
+            ("clf", LogisticRegression(max_iter=2000))
+        ])
+        
+        lr_tuned = GridSearchCV(
+            lr_base, lr_param_grid, cv=3, scoring='roc_auc', 
+            n_jobs=-1
+        )
+        lr_tuned.fit(X_train, y_train)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ Logistic Regression tuned! Best CV AUC: {lr_tuned.best_score_:.4f}")
+        models.append(("LogisticRegression", lr_tuned.best_estimator_))
+
+    if "Random Forest" in selected_models:
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🌲 Tuning Random Forest...")
+        if fast:
+            rf_param_grid = {'clf__n_estimators': [100, 200], 'clf__max_depth': [8, None], 'clf__min_samples_split': [2], 'clf__min_samples_leaf': [1], 'clf__class_weight': ['balanced']}
+        else:
+            rf_param_grid = {
+                'clf__n_estimators': [300, 500, 700],
+                'clf__max_depth': [8, 12, 16, None],
+                'clf__min_samples_split': [2, 5, 10],
+                'clf__min_samples_leaf': [1, 2, 4],
+                'clf__class_weight': ['balanced', 'balanced_subsample']
+            }
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 📋 RF Grid: {len(rf_param_grid['clf__n_estimators'])} × {len(rf_param_grid['clf__max_depth'])} × {len(rf_param_grid['clf__min_samples_split'])} × {len(rf_param_grid['clf__min_samples_leaf'])} × {len(rf_param_grid['clf__class_weight'])} = {len(rf_param_grid['clf__n_estimators']) * len(rf_param_grid['clf__max_depth']) * len(rf_param_grid['clf__min_samples_split']) * len(rf_param_grid['clf__min_samples_leaf']) * len(rf_param_grid['clf__class_weight'])} combinations")
+        
+        rf_base = Pipeline(steps=[
+            ("pre", preprocessor),
+            ("clf", RandomForestClassifier(n_jobs=-1))
+        ])
+        
+        rf_tuned = GridSearchCV(
+            rf_base, rf_param_grid, cv=3, scoring='roc_auc', 
+            n_jobs=-1
+        )
+        rf_tuned.fit(X_train, y_train)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ Random Forest tuned! Best CV AUC: {rf_tuned.best_score_:.4f}")
+        models.append(("RandomForest", rf_tuned.best_estimator_))
+
+    if "Gradient Boosting" in selected_models:
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 📈 Tuning Gradient Boosting...")
+        if fast:
+            gb_param_grid = {'clf__n_estimators': [100, 200], 'clf__learning_rate': [0.05, 0.1], 'clf__max_depth': [3], 'clf__subsample': [0.9]}
+        else:
+            gb_param_grid = {
+                'clf__n_estimators': [200, 400, 600],
+                'clf__learning_rate': [0.01, 0.05, 0.1],
+                'clf__max_depth': [3, 5, 7],
+                'clf__subsample': [0.8, 0.9, 1.0]
+            }
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 📋 GB Grid: {len(gb_param_grid['clf__n_estimators'])} × {len(gb_param_grid['clf__learning_rate'])} × {len(gb_param_grid['clf__max_depth'])} × {len(gb_param_grid['clf__subsample'])} = {len(gb_param_grid['clf__n_estimators']) * len(gb_param_grid['clf__learning_rate']) * len(gb_param_grid['clf__max_depth']) * len(gb_param_grid['clf__subsample'])} combinations")
+        
+        gb_base = Pipeline(steps=[
+            ("pre", preprocessor),
+            ("clf", GradientBoostingClassifier())
+        ])
+        
+        gb_tuned = GridSearchCV(
+            gb_base, gb_param_grid, cv=3, scoring='roc_auc', 
+            n_jobs=-1
+        )
+        gb_tuned.fit(X_train, y_train)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ Gradient Boosting tuned! Best CV AUC: {gb_tuned.best_score_:.4f}")
+        models.append(("GradientBoosting", gb_tuned.best_estimator_))
+
+    if "XGBoost" in selected_models:
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🚀 Tuning XGBoost...")
+        if fast:
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] ⚠️ Skipping XGBoost in Fast mode to avoid heavy installs/training.")
+        else:
+            xgb_param_grid = {
+                'clf__n_estimators': [400, 600, 800],
+                'clf__max_depth': [3, 5, 7],
+                'clf__learning_rate': [0.01, 0.05, 0.1],
+                'clf__subsample': [0.8, 0.9, 1.0],
+                'clf__colsample_bytree': [0.7, 0.8, 0.9]
+            }
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] 📋 XGB Grid: {len(xgb_param_grid['clf__n_estimators'])} × {len(xgb_param_grid['clf__max_depth'])} × {len(xgb_param_grid['clf__learning_rate'])} × {len(xgb_param_grid['clf__subsample'])} × {len(xgb_param_grid['clf__colsample_bytree'])} = {len(xgb_param_grid['clf__n_estimators']) * len(xgb_param_grid['clf__max_depth']) * len(xgb_param_grid['clf__learning_rate']) * len(xgb_param_grid['clf__subsample']) * len(xgb_param_grid['clf__colsample_bytree'])} combinations")
+            try:
+                from xgboost import XGBClassifier
+                xgb_base = Pipeline(steps=[
+                    ("pre", preprocessor),
+                    ("clf", XGBClassifier(
+                        scale_pos_weight=len(y_train[y_train==0]) / max(1, len(y_train[y_train==1])),
+                        n_jobs=-1,
+                        tree_method="hist",
+                        eval_metric="logloss"
+                    ))
+                ])
+                xgb_tuned = GridSearchCV(
+                    xgb_base, xgb_param_grid, cv=3, scoring='roc_auc', 
+                    n_jobs=-1
+                )
+                xgb_tuned.fit(X_train, y_train)
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ XGBoost tuned! Best CV AUC: {xgb_tuned.best_score_:.4f}")
+                models.append(("XGBoost", xgb_tuned.best_estimator_))
+            except Exception as ex:
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] XGBoost not available or failed to train: {ex}")
+
+    if "CatBoost" in selected_models:
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🐱 Tuning CatBoost...")
+        if fast:
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] ⚠️ Skipping CatBoost in Fast mode to avoid heavy installs/training.")
+        else:
+            cb_param_grid = {
+                'clf__iterations': [300, 500, 700],
+                'clf__learning_rate': [0.01, 0.05, 0.1],
+                'clf__depth': [4, 6, 8],
+                'clf__l2_leaf_reg': [1, 3, 5, 7]
+            }
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 📋 CB Grid: {len(cb_param_grid['clf__iterations'])} × {len(cb_param_grid['clf__learning_rate'])} × {len(cb_param_grid['clf__depth'])} × {len(cb_param_grid['clf__l2_leaf_reg'])} = {len(cb_param_grid['clf__iterations']) * len(cb_param_grid['clf__learning_rate']) * len(cb_param_grid['clf__depth']) * len(cb_param_grid['clf__l2_leaf_reg'])} combinations")
+        
+        if not fast:
+            try:
+                from catboost import CatBoostClassifier
+                cb_base = Pipeline(steps=[
+                    ("pre", preprocessor),
+                    ("clf", CatBoostClassifier(
+                        loss_function="Logloss",
+                        eval_metric="AUC",
+                        verbose=False
+                    ))
+                ])
+                cb_tuned = GridSearchCV(
+                    cb_base, cb_param_grid, cv=3, scoring='roc_auc', 
+                    n_jobs=-1
+                )
+                cb_tuned.fit(X_train, y_train)
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ CatBoost tuned! Best CV AUC: {cb_tuned.best_score_:.4f}")
+                models.append(("CatBoost", cb_tuned.best_estimator_))
+            except Exception as ex:
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] CatBoost not available or failed to train: {ex}")
+
+    return models
+
+def get_tuned_models(preprocessor, X_train, y_train):
+    """
+    Returns list of (name, pipeline) tuples with hyperparameter tuning.
+    """
+    models = []
+    
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] 🚀 Starting hyperparameter tuning for all models...")
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] 📊 Training data shape: {X_train.shape}, Target distribution: {np.bincount(y_train)}")
+    
+    # Calculate class weights for imbalanced data
+    class_weights = compute_class_weight('balanced', classes=np.unique(y_train), y=y_train)
+    class_weight_dict = dict(zip(np.unique(y_train), class_weights))
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] ⚖️ Class weights calculated: {class_weight_dict}")
+    
+    # Logistic Regression with tuning
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔍 Tuning Logistic Regression...")
+    lr_param_grid = {
+        'clf__C': [0.01, 0.1, 1.0, 10.0, 100.0],
+        'clf__penalty': ['l1', 'l2'],
+        'clf__solver': ['liblinear', 'saga'],
+        'clf__class_weight': ['balanced', None]
+    }
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] 📋 LR Grid: {len(lr_param_grid['clf__C'])} × {len(lr_param_grid['clf__penalty'])} × {len(lr_param_grid['clf__solver'])} × {len(lr_param_grid['clf__class_weight'])} = {len(lr_param_grid['clf__C']) * len(lr_param_grid['clf__penalty']) * len(lr_param_grid['clf__solver']) * len(lr_param_grid['clf__class_weight'])} combinations")
+    
+    lr_base = Pipeline(steps=[
+        ("pre", preprocessor),
+        ("clf", LogisticRegression(max_iter=2000))
+    ])
+    
+    lr_tuned = GridSearchCV(
+        lr_base, lr_param_grid, cv=3, scoring='roc_auc', 
+        n_jobs=-1
+    )
+    lr_tuned.fit(X_train, y_train)
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ Logistic Regression tuned! Best CV AUC: {lr_tuned.best_score_:.4f}")
+    models.append(("LogisticRegression", lr_tuned.best_estimator_))
+
+    # Random Forest with tuning
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] 🌲 Tuning Random Forest...")
+    rf_param_grid = {
+        'clf__n_estimators': [300, 500, 700],
+        'clf__max_depth': [8, 12, 16, None],
+        'clf__min_samples_split': [2, 5, 10],
+        'clf__min_samples_leaf': [1, 2, 4],
+        'clf__class_weight': ['balanced', 'balanced_subsample']
+    }
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] 📋 RF Grid: {len(rf_param_grid['clf__n_estimators'])} × {len(rf_param_grid['clf__max_depth'])} × {len(rf_param_grid['clf__min_samples_split'])} × {len(rf_param_grid['clf__min_samples_leaf'])} × {len(rf_param_grid['clf__class_weight'])} = {len(rf_param_grid['clf__n_estimators']) * len(rf_param_grid['clf__max_depth']) * len(rf_param_grid['clf__min_samples_split']) * len(rf_param_grid['clf__min_samples_leaf']) * len(rf_param_grid['clf__class_weight'])} combinations")
+    
+    rf_base = Pipeline(steps=[
+        ("pre", preprocessor),
+        ("clf", RandomForestClassifier(n_jobs=-1))
+    ])
+    
+    rf_tuned = GridSearchCV(
+        rf_base, rf_param_grid, cv=3, scoring='roc_auc', 
+        n_jobs=-1
+    )
+    rf_tuned.fit(X_train, y_train)
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ Random Forest tuned! Best CV AUC: {rf_tuned.best_score_:.4f}")
+    models.append(("RandomForest", rf_tuned.best_estimator_))
+
+    # Gradient Boosting
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] 📈 Tuning Gradient Boosting...")
+    gb_param_grid = {
+        'clf__n_estimators': [200, 400, 600],
+        'clf__learning_rate': [0.01, 0.05, 0.1],
+        'clf__max_depth': [3, 5, 7],
+        'clf__subsample': [0.8, 0.9, 1.0]
+    }
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] 📋 GB Grid: {len(gb_param_grid['clf__n_estimators'])} × {len(gb_param_grid['clf__learning_rate'])} × {len(gb_param_grid['clf__max_depth'])} × {len(gb_param_grid['clf__subsample'])} = {len(gb_param_grid['clf__n_estimators']) * len(gb_param_grid['clf__learning_rate']) * len(gb_param_grid['clf__max_depth']) * len(gb_param_grid['clf__subsample'])} combinations")
+    
+    gb_base = Pipeline(steps=[
+        ("pre", preprocessor),
+        ("clf", GradientBoostingClassifier())
+    ])
+    
+    gb_tuned = GridSearchCV(
+        gb_base, gb_param_grid, cv=3, scoring='roc_auc', 
+        n_jobs=-1
+    )
+    gb_tuned.fit(X_train, y_train)
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ Gradient Boosting tuned! Best CV AUC: {gb_tuned.best_score_:.4f}")
+    models.append(("GradientBoosting", gb_tuned.best_estimator_))
+
+    # CatBoost with tuning
+    try:
+        from catboost import CatBoostClassifier
+        cb_param_grid = {
+            'clf__iterations': [400, 600, 800],
+            'clf__learning_rate': [0.03, 0.05, 0.1],
+            'clf__depth': [4, 6, 8],
+            'clf__l2_leaf_reg': [1, 3, 5, 7]
+        }
+        
+        cb_base = Pipeline(steps=[
+            ("pre", preprocessor),
+            ("clf", CatBoostClassifier(
+                loss_function="Logloss",
+                eval_metric="AUC",
+                verbose=False
+            ))
+        ])
+        
+        cb_tuned = GridSearchCV(
+            cb_base, cb_param_grid, cv=3, scoring='roc_auc', 
+            n_jobs=-1
+        )
+        cb_tuned.fit(X_train, y_train)
+        models.append(("CatBoost", cb_tuned.best_estimator_))
+    except Exception:
+        pass
+
+    # XGBoost with tuning
+    try:
+        from xgboost import XGBClassifier
+        xgb_param_grid = {
+            'clf__n_estimators': [400, 600, 800],
+            'clf__max_depth': [3, 5, 7],
+            'clf__learning_rate': [0.01, 0.05, 0.1],
+            'clf__subsample': [0.8, 0.9, 1.0],
+            'clf__colsample_bytree': [0.7, 0.8, 0.9]
+        }
+        
+        xgb_base = Pipeline(steps=[
+            ("pre", preprocessor),
+            ("clf", XGBClassifier(
+                scale_pos_weight=len(y_train[y_train==0])/len(y_train[y_train==1]),
+                n_jobs=-1,
+                tree_method="hist",
+                eval_metric="logloss"
+            ))
+        ])
+        
+        xgb_tuned = GridSearchCV(
+            xgb_base, xgb_param_grid, cv=3, scoring='roc_auc', 
+            n_jobs=-1
+        )
+        xgb_tuned.fit(X_train, y_train)
+        models.append(("XGBoost", xgb_tuned.best_estimator_))
+    except Exception:
+        pass
+
+    # LightGBM with tuning
+    try:
+        from lightgbm import LGBMClassifier
+        lgbm_param_grid = {
+            'clf__n_estimators': [400, 600, 800],
+            'clf__max_depth': [3, 5, 7, -1],
+            'clf__learning_rate': [0.01, 0.05, 0.1],
+            'clf__subsample': [0.8, 0.9, 1.0],
+            'clf__colsample_bytree': [0.7, 0.8, 0.9]
+        }
+        
+        lgbm_base = Pipeline(steps=[
+            ("pre", preprocessor),
+            ("clf", LGBMClassifier(
+                class_weight='balanced',
+                n_jobs=-1,
+                verbose=-1
+            ))
+        ])
+        
+        lgbm_tuned = GridSearchCV(
+            lgbm_base, lgbm_param_grid, cv=3, scoring='roc_auc', 
+            n_jobs=-1
+        )
+        lgbm_tuned.fit(X_train, y_train)
+        models.append(("LightGBM", lgbm_tuned.best_estimator_))
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] LightGBM model added successfully")
+    except Exception as e:
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] LightGBM not available: {e}")
+        pass
+
+    return models
+
+def create_ensemble_model(models, preprocessor, X_train, y_train):
+    """
+    Create a voting ensemble from the best models.
+    """
+    # Get the top 3 models by CV performance
+    cv_scores = []
+    for name, model in models:
+        cv_auc = cross_val_score(model, X_train, y_train, scoring="roc_auc", cv=3, n_jobs=-1)
+        cv_scores.append((name, model, cv_auc.mean()))
+    
+    cv_scores.sort(key=lambda x: x[2], reverse=True)
+    top_models = cv_scores[:3]
+    
+    # Create voting classifier
+    ensemble = VotingClassifier(
+        estimators=[(name, model) for name, model, _ in top_models],
+        voting='soft'
+    )
+    
+    # Fit ensemble directly (don't wrap in pipeline to avoid ColumnTransformer issues)
+    ensemble.fit(X_train, y_train)
+    
+    models.append(("Ensemble", ensemble))
+    return models
+
+def evaluate_models(X_train, y_train, X_test, y_test, models):
+    """
+    Advanced evaluation with multiple metrics and ensemble creation.
+    """
+    results = []
+    trained = {}
+    fprs, tprs, aucs = [], [], []
+    names_for_roc = []
+
+    skf = StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=RANDOM_STATE)
+
+    # CV first, pick best by mean CV AUC
+    cv_auc_by_model = []
+    for name, pipe in models:
+        cv_auc = cross_val_score(pipe, X_train, y_train, scoring="roc_auc", cv=skf, n_jobs=-1)
+        cv_auc_by_model.append((name, cv_auc.mean(), cv_auc.std()))
+
+    # Sort by CV AUC
+    cv_auc_by_model.sort(key=lambda t: t[1], reverse=True)
+    
+    # Fit all models
+    for name, pipe in models:
+        pipe.fit(X_train, y_train)
+        trained[name] = pipe
+        
+        # Get predictions
+        if hasattr(pipe[-1], "predict_proba"):
+            y_proba = pipe.predict_proba(X_test)[:, 1]
+        else:
+            if hasattr(pipe[-1], "decision_function"):
+                raw = pipe.decision_function(X_test)
+                y_proba = (raw - raw.min()) / (raw.max() - raw.min() + 1e-9)
+            else:
+                y_proba = np.zeros_like(y_test, dtype=float)
+
+        y_pred = (y_proba >= 0.5).astype(int)
+
+        # Calculate comprehensive metrics
+        test_auc = roc_auc_score(y_test, y_proba)
+        acc = accuracy_score(y_test, y_pred)
+        f1 = f1_score(y_test, y_pred)
+        precision = precision_score(y_test, y_pred)
+        recall = recall_score(y_test, y_pred)
+
+        cv_mean = next((m for n, m, s in cv_auc_by_model if n == name), np.nan)
+        cv_std = next((s for n, m, s in cv_auc_by_model if n == name), np.nan)
+
+        results.append({
+            "Model": name,
+            "CV AUC Mean": round(cv_mean, 4),
+            "CV AUC Std": round(cv_std, 4),
+            "Test AUC": round(test_auc, 4),
+            "Test Accuracy": round(acc, 4),
+            "Test F1": round(f1, 4),
+            "Test Precision": round(precision, 4),
+            "Test Recall": round(recall, 4),
+        })
+
+        fpr, tpr, _ = roc_curve(y_test, y_proba)
+        fprs.append(fpr); tprs.append(tpr)
+        aucs.append(auc(fpr, tpr))
+        names_for_roc.append(name)
+
+    # Sort by test accuracy for final ranking
+    scorecard_df = pd.DataFrame(results).sort_values("Test Accuracy", ascending=False).reset_index(drop=True)
+
+    # ROC plot (all models) - use seaborn styling and clearer legend
+    roc_path = f"roc_all_{datetime.now().strftime('%H%M%S')}.png"
+    plt.figure(figsize=(10, 8))
+    for fpr, tpr, name in zip(fprs, tprs, names_for_roc):
+        plt.plot(fpr, tpr, lw=2, label=f"{name} (AUC={auc(fpr,tpr):.3f})")
+    plt.plot([0, 1], [0, 1], linestyle='--', color='gray')
+    plt.xlabel("False Positive Rate")
+    plt.ylabel("True Positive Rate")
+    plt.title("ROC Curves (Test)")
+    plt.legend(loc="lower right", frameon=True)
+    plt.grid(alpha=0.25)
+    plt.tight_layout()
+    plt.savefig(roc_path, dpi=140, bbox_inches='tight')
+    plt.close()
+
+    # Confusion matrix (best by test accuracy)
+    best_row = scorecard_df.iloc[0]
+    best_name = best_row["Model"]
+    best_pipe = trained[best_name]
+    
+    if hasattr(best_pipe[-1], "predict_proba"):
+        best_proba = best_pipe.predict_proba(X_test)[:, 1]
+    else:
+        if hasattr(best_pipe[-1], "decision_function"):
+            raw = best_pipe[-1].decision_function(X_test)
+            best_proba = (raw - raw.min()) / (raw.max() - raw.min() + 1e-9)
+        else:
+            best_proba = np.zeros_like(y_test, dtype=float)
+    
+    best_pred = (best_proba >= 0.5).astype(int)
+
+    conf = confusion_matrix(y_test, best_pred)
+    conf_path = f"confusion_best_{datetime.now().strftime('%H%M%S')}.png"
+    # Use seaborn heatmap for a nicer confusion matrix
+    fig, ax = plt.subplots(figsize=(6, 6))
+    sns.heatmap(conf, annot=True, fmt='d', cmap='Blues', cbar=False, ax=ax)
+    ax.set_xlabel('Predicted')
+    ax.set_ylabel('Actual')
+    ax.set_title(f"Confusion Matrix (Best: {best_name})")
+    plt.tight_layout()
+    plt.savefig(conf_path, dpi=140, bbox_inches='tight')
+    plt.close()
+
+    return scorecard_df, roc_path, conf_path, best_name, trained
+
+# -------------------------------
+# SHAP Explainability
+# -------------------------------
+def compute_shap_images(trained_pipe, preprocessor, X_sample, feature_names_out):
+    """
+    Returns list of image paths for SHAP (summary & bar). If fails, returns [].
+    """
+    paths = []
+    try:
+        # Transform X through preprocessor so SHAP sees the exact model input
+        X_trans = preprocessor.transform(X_sample)
+        model = trained_pipe[-1]
+
+        # Pick explainer by estimator type
+        if hasattr(model, "predict_proba"):
+            explainer = shap.TreeExplainer(model) if hasattr(model, "tree_") else shap.LinearExplainer(model, X_trans)
+        else:
+            explainer = shap.KernelExplainer(model.predict, X_trans[:100])  # sample for speed
+
+        # SHAP values
+        shap_values = explainer.shap_values(X_trans)
+
+        # Handle multi-output case
+        if isinstance(shap_values, list):
+            shap_values = shap_values[1]  # positive class
+
+        # Summary plot
+        summary_path = f"shap_summary_{datetime.now().strftime('%H%M%S')}.png"
+        plt.figure(figsize=(10, 8))
+        shap.summary_plot(shap_values, X_trans, feature_names=feature_names_out, show=False)
+        plt.tight_layout()
+        plt.savefig(summary_path, dpi=130, bbox_inches='tight')
+        plt.close()
+        paths.append(summary_path)
+
+        # Bar plot
+        bar_path = f"shap_bar_{datetime.now().strftime('%H%M%S')}.png"
+        plt.figure(figsize=(10, 8))
+        shap.summary_plot(shap_values, X_trans, feature_names=feature_names_out, plot_type="bar", show=False)
+        plt.tight_layout()
+        plt.savefig(bar_path, dpi=130, bbox_inches='tight')
+        plt.close()
+        paths.append(bar_path)
+
+    except Exception as e:
+        print(f"SHAP computation failed: {e}")
+        return []
+
+    return paths
+
+# -------------------------------
+# Main processing function
+# -------------------------------
+def train_selected_models_only(selected_models, allow_install=False, fast=False):
+    """Train only the selected models based on UI selections. Returns a result dict.
+
+    - fast: when True use compact grids and smaller SHAP samples to run on resource-limited hosts.
+    """
+    try:
+        # Ensure optional libraries (may attempt install if allow_install)
+        available = ensure_optional_libs(allow_install)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Available libraries: {available}")
+
+        # Load and prepare data
+        df = load_telco_data()
+        preprocessor, numeric_cols, categorical_cols = get_preprocessor(df)
+
+        X_train, X_test, y_train, y_test = split_xy(df)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Data split. Train: {X_train.shape}, Test: {X_test.shape}")
+
+        # Train only the selected models (fast flag forwarded)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🚀 Starting training for selected models: {selected_models} (fast={fast})")
+        models = get_tuned_models_selected(preprocessor, X_train, y_train, selected_models, fast=fast)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ Created {len(models)} tuned models")
+
+        # Optionally create voting ensemble if several models present
+        if len(models) > 1:
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] 🏆 Creating ensemble from selected models...")
+            models = create_ensemble_model(models, preprocessor, X_train, y_train)
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ Ensemble model added! Total models: {len(models)}")
+
+        # Preprocess once for evaluation
+        X_train_processed = preprocessor.fit_transform(X_train)
+        X_test_processed = preprocessor.transform(X_test)
+
+        # Evaluate models
+        scorecard_df, roc_path, conf_path, best_name, trained = evaluate_models(
+            X_train, y_train, X_test, y_test, models
+        )
+
+        feature_names_out = preprocessor.get_feature_names_out()
+
+        return {
+            "success": True,
+            "scorecard": scorecard_df,
+            "roc_path": roc_path,
+            "conf_path": conf_path,
+            "best_name": best_name,
+            "trained": trained,
+            "feature_names": feature_names_out,
+            "X_sample": X_test[:100],
+            "preprocessor": preprocessor
+        }
+
+    except Exception as e:
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Error during selected-model training: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "error": str(e)}
+
+def process_telco_data(allow_install=False):
+    """
+    Main function to process Telco data with all improvements.
+    """
+    try:
+        # Ensure libraries
+        available = ensure_optional_libs(allow_install)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Available libraries: {available}")
+
+        # Load and engineer data
+        df = load_telco_data()
+        
+        # Get preprocessor
+        preprocessor, numeric_cols, categorical_cols = get_preprocessor(df)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Preprocessor created. Numeric: {len(numeric_cols)}, Categorical: {len(categorical_cols)}")
+
+        # Split data
+        X_train, X_test, y_train, y_test = split_xy(df)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Data split. Train: {X_train.shape}, Test: {X_test.shape}")
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Class distribution - Train: {np.bincount(y_train)}, Test: {np.bincount(y_test)}")
+
+        # Get tuned models
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🚀 Starting model training phase...")
+        models = get_tuned_models(preprocessor, X_train, y_train)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ Created {len(models)} tuned models")
+
+        # Create ensemble
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🏆 Creating ensemble model...")
+        models = create_ensemble_model(models, preprocessor, X_train, y_train)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ Ensemble model added! Total models: {len(models)}")
+        
+        # Preprocess data once for evaluation
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔄 Preprocessing data for evaluation...")
+        X_train_processed = preprocessor.fit_transform(X_train)
+        X_test_processed = preprocessor.transform(X_test)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ Data preprocessing complete!")
+
+        # Evaluate all models
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 📊 Starting model evaluation phase...")
+        scorecard_df, roc_path, conf_path, best_name, trained = evaluate_models(
+            X_train, y_train, X_test, y_test, models
+        )
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ Model evaluation complete!")
+
+        # Get feature names for SHAP
+        feature_names_out = preprocessor.get_feature_names_out()
+
+        return {
+            "success": True,
+            "scorecard": scorecard_df,
+            "roc_path": roc_path,
+            "conf_path": conf_path,
+            "best_name": best_name,
+            "trained": trained,
+            "feature_names": feature_names_out,
+            "X_sample": X_test[:100],  # sample for SHAP
+            "preprocessor": preprocessor
+        }
+
+    except Exception as e:
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "error": str(e)}
+
+# -------------------------------
+# Configuration & Time Estimation
+# -------------------------------
+def estimate_training_time(model_config):
+    """Estimate training time based on model configuration."""
+    base_time = 30  # Base time in seconds
+    
+    # Calculate total combinations
+    total_combinations = 1
+    for param, values in model_config.items():
+        if isinstance(values, list):
+            total_combinations *= len(values)
+    
+    # Estimate time per combination (including CV)
+    time_per_combination = 2  # seconds per combination × 3-fold CV
+    estimated_time = (total_combinations * time_per_combination) + base_time
+    
+    return estimated_time, total_combinations
+
+def get_model_configurations():
+    """Get all available model configurations with time estimates."""
+    configs = {
+        "Logistic Regression": {
+            "params": {
+                'clf__C': [0.01, 0.1, 1.0, 10.0, 100.0],
+                'clf__penalty': ['l1', 'l2'],
+                'clf__solver': ['liblinear', 'saga'],
+                'clf__class_weight': ['balanced', None]
+            },
+            "description": "Linear model with L1/L2 regularization",
+            "complexity": "Low",
+            "best_for": "Interpretability, baseline performance"
+        },
+        "Random Forest": {
+            "params": {
+                'clf__n_estimators': [300, 500, 700],
+                'clf__max_depth': [8, 12, 16, None],
+                'clf__min_samples_split': [2, 5, 10],
+                'clf__min_samples_leaf': [1, 2, 4],
+                'clf__class_weight': ['balanced', 'balanced_subsample']
+            },
+            "description": "Ensemble of decision trees with bagging",
+            "complexity": "Medium",
+            "best_for": "Robust performance, feature importance"
+        },
+        "Gradient Boosting": {
+            "params": {
+                'clf__n_estimators': [200, 400, 600],
+                'clf__learning_rate': [0.01, 0.05, 0.1],
+                'clf__max_depth': [3, 5, 7],
+                'clf__subsample': [0.8, 0.9, 1.0]
+            },
+            "description": "Sequential boosting with gradient descent",
+            "complexity": "Medium-High",
+            "best_for": "High accuracy, complex patterns"
+        },
+        "XGBoost": {
+            "params": {
+                'clf__n_estimators': [400, 600, 800],
+                'clf__max_depth': [3, 5, 7],
+                'clf__learning_rate': [0.01, 0.05, 0.1],
+                'clf__subsample': [0.8, 0.9, 1.0],
+                'clf__colsample_bytree': [0.7, 0.8, 0.9]
+            },
+            "description": "Optimized gradient boosting with regularization",
+            "complexity": "High",
+            "best_for": "Competition-level performance, scalability"
+        },
+        "CatBoost": {
+            "params": {
+                'clf__iterations': [300, 500, 700],
+                'clf__learning_rate': [0.01, 0.05, 0.1],
+                'clf__depth': [4, 6, 8],
+                'clf__l2_leaf_reg': [1, 3, 5, 7]
+            },
+            "description": "Categorical boosting with advanced preprocessing",
+            "complexity": "Medium-High",
+            "best_for": "Categorical features, robust training"
+        }
+    }
+    
+    # Calculate time estimates
+    for model_name, config in configs.items():
+        time_est, combinations = estimate_training_time(config["params"])
+        config["estimated_time"] = time_est
+        config["total_combinations"] = combinations
+    
+    return configs
+
+# -------------------------------
+# Professional Gradio Interface
+# -------------------------------
+# Module-level storage for latest training result (used by SHAP compute)
+TRAINED_RESULT = None
+
+# -------------------------------
+# Frontend handler functions (top-level)
+# -------------------------------
+def train_models_handler(cv_folds, ensemble_size, feature_selection, lr_selected, rf_selected, gb_selected, xgb_selected, cat_selected, mode, uploaded_file=None):
+    """Wrapper handler for Gradio. Uses train_selected_models_only and stores result."""
+    global TRAINED_RESULT
+    # Mirror previous nested train_models behavior
+    # Set defaults
+    if cv_folds is None:
+        cv_folds = 3
+    if ensemble_size is None:
+        ensemble_size = 3
+    if lr_selected is None:
+        lr_selected = False
+    if rf_selected is None:
+        rf_selected = False
+    if gb_selected is None:
+        gb_selected = False
+    if xgb_selected is None:
+        xgb_selected = False
+    if cat_selected is None:
+        cat_selected = False
+
+    # Build selected models
+    selected_models = []
+    if lr_selected:
+        selected_models.append("Logistic Regression")
+    if rf_selected:
+        selected_models.append("Random Forest")
+    if gb_selected:
+        selected_models.append("Gradient Boosting")
+    if xgb_selected:
+        selected_models.append("XGBoost")
+    if cat_selected:
+        selected_models.append("CatBoost")
+
+    if not selected_models:
+        return (pd.DataFrame(), "Error: No models selected", None, None, "Status: No models selected", "Estimated Time: 0s")
+
+    fast_mode = (mode == "Fast")
+
+    # start training
+    result = train_selected_models_only(selected_models, allow_install=True, fast=fast_mode, uploaded_file=uploaded_file)
+    if result.get("success"):
+        TRAINED_RESULT = result
+        best_row = result["scorecard"].iloc[0]
+        best_summary = f"""
+### Best Model: {best_row['Model']}
+
+Test Performance:
+- Accuracy: {best_row['Test Accuracy']:.3f}
+- F1 Score: {best_row['Test F1']:.3f}
+- AUC: {best_row['Test AUC']:.3f}
+- Precision: {best_row['Test Precision']:.3f}
+- Recall: {best_row['Test Recall']:.3f}
+
+Cross-Validation:
+- CV AUC: {best_row['CV AUC Mean']:.3f} ± {best_row['CV AUC Std']:.3f}
+"""
+        return (result["scorecard"], best_summary, result.get("roc_path"), result.get("conf_path"), "Status: Training completed successfully! ✅", "")
+    else:
+        err = result.get('error', 'Unknown error')
+        return (pd.DataFrame(), f"Error: {err}", None, None, f"Status: Training failed ❌ - {err}", "Estimated Time: Error occurred")
+
+
+def test_ui_handler():
+    return "UI is working! Status updated successfully.", "Test completed"
+
+
+def compute_shap_handler():
+    global TRAINED_RESULT
+    if TRAINED_RESULT:
+        result = TRAINED_RESULT
+        shap_paths = compute_shap_images(
+            result["trained"][result["best_name"]],
+            result["preprocessor"],
+            result["X_sample"],
+            result["feature_names"]
+        )
+        if len(shap_paths) >= 2:
+            return shap_paths[0], shap_paths[1]
+        return None, None
+    return None, None
+
+
+def preview_dataset_handler(uploaded_file=None):
+    try:
+        if uploaded_file:
+            path = uploaded_file.name if hasattr(uploaded_file, 'name') else uploaded_file
+            df = pd.read_csv(path)
+        else:
+            df = pd.read_csv(TELCO_CSV)
+        return df.head(50)
+    except Exception:
+        return pd.DataFrame()
+
+def create_gradio_interface():
+    """
+    Create an absolutely minimal, 100% compatible Gradio interface for older versions.
+    """
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Entering create_gradio_interface()")
+    with gr.Blocks() as demo:
+        # Header
+        gr.Markdown("# Enterprise ML Pipeline - Telco Churn Prediction")
+        gr.Markdown("AI Expert-Grade Machine Learning")
+        
+        with gr.Row():
+            with gr.Column():
+                gr.Markdown("## Dataset Analysis")
+                gr.Markdown("Telco Churn Dataset: 7,043 customers, 42 features")
+                gr.Markdown("Target: 83%+ accuracy for churn prediction")
+                
+                gr.Markdown("---")
+                gr.Markdown("## Approach & Positioning")
+                gr.Markdown("This demo presents an enterprise-grade ML pipeline: structured feature engineering, stratified CV, efficient hyperparameter tuning, and explainability via SHAP. The `Fast` mode uses compact grids for quick demos and hosting limits; `Full` mode performs broader searches for production-ready tuning. Built by a hands-on ML engineer focused on reproducibility and operational readiness.")
+                
+                gr.Markdown("## ML Features")
+                gr.Markdown("- Advanced Feature Engineering")
+                gr.Markdown("- Hyperparameter Optimization")
+                gr.Markdown("- Ensemble Methods")
+                gr.Markdown("- SHAP Explainability")
+                
+            with gr.Column():
+                gr.Markdown("## Configuration")
+                
+                # Model Selection (labeled)
+                gr.Markdown("### Model Selection")
+                lr_checkbox = gr.Checkbox(label="Logistic Regression")
+                rf_checkbox = gr.Checkbox(label="Random Forest")
+                gb_checkbox = gr.Checkbox(label="Gradient Boosting")
+                xgb_checkbox = gr.Checkbox(label="XGBoost")
+                cat_checkbox = gr.Checkbox(label="CatBoost")
+                
+                # Options
+                gr.Markdown("### Options")
+                cv_folds = gr.Number(value=3, label="CV Folds (3-10)")
+                ensemble_size = gr.Number(value=3, label="Ensemble Size (2-5)")
+                feature_selection = gr.Checkbox(label="Feature Selection")
+                preview_btn = gr.Button("Preview Dataset")
+                mode_toggle = gr.Radio(choices=["Fast", "Full"], value="Fast", label="Mode")
+                file_input = gr.File(file_count="single", file_types=['.csv'], label="Upload CSV (optional)")
+        
+        # Controls
+        gr.Markdown("## Training")
+        btn_train = gr.Button("Start Training")
+        btn_test = gr.Button("Test UI")
+                
+        # Status
+        status_text = gr.Markdown("Status: Ready")
+        time_estimate = gr.Markdown("Time: Calculating...")
+        dataset_preview = gr.DataFrame(headers=None, interactive=False)
+                
+        # Results
+        gr.Markdown("## Results")
+        with gr.Row():
+            with gr.Column():
+                gr.Markdown("### Performance")
+                scorecard_output = gr.DataFrame()
+                best_model_output = gr.Markdown()
+                
+            with gr.Column():
+                gr.Markdown("### Visualizations")
+                roc_output = gr.Image(type="filepath")
+                conf_output = gr.Image(type="filepath")
+        
+        # SHAP
+        gr.Markdown("## SHAP Analysis")
+        with gr.Row():
+            with gr.Column():
+                shap_summary = gr.Image(type="filepath")
+            with gr.Column():
+                shap_bar = gr.Image(type="filepath")
+                btn_shap = gr.Button("Compute SHAP")
+
+        # Event handlers
+    def train_models(cv_folds, ensemble_size, feature_selection, lr_selected, rf_selected, gb_selected, xgb_selected, cat_selected, mode, uploaded_file=None):
+        """This function yields progress updates so Gradio shows live status."""
+        # Set defaults if None
+        if cv_folds is None:
+            cv_folds = 3
+        if ensemble_size is None:
+            ensemble_size = 3
+        if lr_selected is None:
+            lr_selected = False
+        if rf_selected is None:
+            rf_selected = False
+        if gb_selected is None:
+            gb_selected = False
+        if xgb_selected is None:
+            xgb_selected = False
+        if cat_selected is None:
+            cat_selected = False
+
+        # Calculate total estimated time based on selected models
+        total_time = 0
+        total_combinations = 0
+
+        if lr_selected:
+            total_time += 40
+            total_combinations += 40
+        if rf_selected:
+            total_time += 72
+            total_combinations += 216
+        if gb_selected:
+            total_time += 81
+            total_combinations += 81
+        if xgb_selected:
+            total_time += 243
+            total_combinations += 243
+        if cat_selected:
+            total_time += 108
+            total_combinations += 108
+
+        # Build selected models list
+        selected_models = []
+        if lr_selected:
+            selected_models.append("Logistic Regression")
+        if rf_selected:
+            selected_models.append("Random Forest")
+        if gb_selected:
+            selected_models.append("Gradient Boosting")
+        if xgb_selected:
+            selected_models.append("XGBoost")
+        if cat_selected:
+            selected_models.append("CatBoost")
+
+        if not selected_models:
+            # No models selected - return an error tuple matching outputs
+            yield (gr.DataFrame(), "Error: No models selected", None, None, "Status: No models selected", "Estimated Time: 0s")
+            return
+
+        status_update = f"Status: Starting training for {len(selected_models)} models: {', '.join(selected_models)}"
+        time_update = f"Estimated Time: {total_time//60}m {total_time%60}s | Combinations: {total_combinations:,}"
+
+        # Determine fast mode from UI
+        fast_mode = (mode == "Fast")
+
+        # First quick status update
+        yield (gr.DataFrame(), "Starting... preparing data and environment", None, None, f"Status: Preparing - fast={fast_mode}", time_update)
+
+        # Start training with ONLY selected models (high-level wrapper)
+        result = train_selected_models_only(selected_models, allow_install=True, fast=fast_mode, uploaded_file=uploaded_file)
+        if result.get("success"):
+            # Store for SHAP computation
+            demo.trained_result = result
+
+            # Format best model summary
+            best_row = result["scorecard"].iloc[0]
+            best_summary = f"""
+### Best Model: {best_row['Model']}
+
+Test Performance:
+- Accuracy: {best_row['Test Accuracy']:.3f}
+- F1 Score: {best_row['Test F1']:.3f}
+- AUC: {best_row['Test AUC']:.3f}
+- Precision: {best_row['Test Precision']:.3f}
+- Recall: {best_row['Test Recall']:.3f}
+
+Cross-Validation:
+- CV AUC: {best_row['CV AUC Mean']:.3f} ± {best_row['CV AUC Std']:.3f}
+"""
+
+            yield (result["scorecard"], best_summary, result.get("roc_path"), result.get("conf_path"), "Status: Training completed successfully! ✅", time_update)
+            return
+        else:
+            err = result.get('error', 'Unknown error')
+            yield (gr.DataFrame(), f"Error: {err}", None, None, f"Status: Training failed ❌ - {err}", "Estimated Time: Error occurred")
+            return
+
+    def test_ui():
+        """Test function to verify UI is working."""
+        return "UI is working! Status updated successfully.", "Test completed"
+
+    def compute_shap():
+        if hasattr(demo, 'trained_result'):
+            result = demo.trained_result
+            shap_paths = compute_shap_images(
+                result["trained"][result["best_name"]],
+                result["preprocessor"],
+                result["X_sample"],
+                result["feature_names"]
+            )
+
+            if len(shap_paths) >= 2:
+                return shap_paths[0], shap_paths[1]
+            else:
+                return None, None
+        else:
+            return None, None
+
+    def preview_dataset(uploaded_file=None):
+        try:
+            if uploaded_file:
+                path = uploaded_file.name if hasattr(uploaded_file, 'name') else uploaded_file
+                df = pd.read_csv(path)
+            else:
+                df = pd.read_csv(TELCO_CSV)
+            # show first 50 rows
+            return gr.DataFrame.update(value=df.head(50))
+        except Exception:
+            return gr.DataFrame.update(value=pd.DataFrame())
+
+    # Register event handlers at the Blocks scope (not nested inside preview_dataset)
+    preview_btn.click(fn=preview_dataset, inputs=[file_input], outputs=[dataset_preview])
+
+    # Connect event handlers (registered inside Blocks context)
+    btn_train.click(
+        fn=train_models,
+        inputs=[cv_folds, ensemble_size, feature_selection, lr_checkbox, rf_checkbox, gb_checkbox, xgb_checkbox, cat_checkbox, mode_toggle, file_input],
+        outputs=[scorecard_output, best_model_output, roc_output, conf_output, status_text, time_estimate]
+    )
+
+    btn_test.click(
+        fn=test_ui,
+        outputs=[status_text, time_estimate]
+    )
+
+    btn_shap.click(
+        fn=compute_shap,
+        outputs=[shap_summary, shap_bar]
+    )
+
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Exiting create_gradio_interface() and returning demo")
+    return demo
+
+# -------------------------------
+# Main execution
+# -------------------------------
+if __name__ == "__main__":
+    demo = create_gradio_interface()
+    demo.launch(server_name="0.0.0.0", server_port=7860, share=False)
