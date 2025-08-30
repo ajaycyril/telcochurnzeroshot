@@ -51,6 +51,8 @@ from sklearn.utils.class_weight import compute_class_weight
 import shap
 
 import gradio as gr
+import joblib
+
 
 # -------------------------------
 # Constants / Defaultss
@@ -1359,6 +1361,20 @@ def train_selected_models_only(selected_models, allow_install=False, fast=False)
 
         feature_names_out = preprocessor.get_feature_names_out()
 
+        # Persist trained models for inspection / reuse
+        model_dir = os.path.join(os.path.dirname(__file__), "models")
+        os.makedirs(model_dir, exist_ok=True)
+        model_paths = {}
+        try:
+            for name, pipe in trained.items():
+                safe_name = name.replace(" ", "_")
+                path = os.path.join(model_dir, f"{safe_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.joblib")
+                joblib.dump(pipe, path)
+                model_paths[name] = path
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Persisted models to {model_dir}")
+        except Exception as e:
+            print(f"Failed to persist models: {e}")
+
         return {
             "success": True,
             "scorecard": scorecard_df,
@@ -1366,6 +1382,7 @@ def train_selected_models_only(selected_models, allow_install=False, fast=False)
             "conf_path": conf_path,
             "best_name": best_name,
             "trained": trained,
+            "model_paths": model_paths,
             "feature_names": feature_names_out,
             "X_sample": X_test[:100],
             "preprocessor": preprocessor
@@ -1879,6 +1896,19 @@ Cross-Validation:
             fn=compute_shap,
             outputs=[shap_summary, shap_bar]
         )
+
+            # On load (Spaces start), attempt to ensure dataset is present and show a preview
+            def _on_startup():
+                # Try to load data via the same loader; returns a small preview or error
+                try:
+                    df = load_telco_data()
+                    return gr.DataFrame.update(value=df.head(20))
+                except Exception as e:
+                    print(f"Startup dataset load failed: {e}")
+                    return gr.DataFrame.update(value=pd.DataFrame())
+
+            # Hook into Gradio load so Spaces will execute the loader at startup
+            demo.load(fn=_on_startup, inputs=None, outputs=[dataset_preview])
 
     print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Exiting create_gradio_interface() and returning demo")
     return demo
