@@ -1646,81 +1646,82 @@ def create_gradio_interface():
                 shap_bar = gr.Image(type="filepath")
                 btn_shap = gr.Button("Compute SHAP")
 
-        # Event handlers
-    def train_models(cv_folds, ensemble_size, feature_selection, lr_selected, rf_selected, gb_selected, xgb_selected, cat_selected, mode, uploaded_file=None):
-        """This function yields progress updates so Gradio shows live status."""
-        # Set defaults if None
-        if cv_folds is None:
-            cv_folds = 3
-        if ensemble_size is None:
-            ensemble_size = 3
-        if lr_selected is None:
-            lr_selected = False
-        if rf_selected is None:
-            rf_selected = False
-        if gb_selected is None:
-            gb_selected = False
-        if xgb_selected is None:
-            xgb_selected = False
-        if cat_selected is None:
-            cat_selected = False
+        # Event handlers: define handlers inside the active Blocks scope so `.click()`
+        # calls occur while the gradio Blocks context is active (required by older gradio versions).
+        def train_models(cv_folds, ensemble_size, feature_selection, lr_selected, rf_selected, gb_selected, xgb_selected, cat_selected, mode, uploaded_file=None):
+            """This function yields progress updates so Gradio shows live status."""
+            # Set defaults if None
+            if cv_folds is None:
+                cv_folds = 3
+            if ensemble_size is None:
+                ensemble_size = 3
+            if lr_selected is None:
+                lr_selected = False
+            if rf_selected is None:
+                rf_selected = False
+            if gb_selected is None:
+                gb_selected = False
+            if xgb_selected is None:
+                xgb_selected = False
+            if cat_selected is None:
+                cat_selected = False
 
-        # Calculate total estimated time based on selected models
-        total_time = 0
-        total_combinations = 0
+            # Calculate total estimated time based on selected models
+            total_time = 0
+            total_combinations = 0
 
-        if lr_selected:
-            total_time += 40
-            total_combinations += 40
-        if rf_selected:
-            total_time += 72
-            total_combinations += 216
-        if gb_selected:
-            total_time += 81
-            total_combinations += 81
-        if xgb_selected:
-            total_time += 243
-            total_combinations += 243
-        if cat_selected:
-            total_time += 108
-            total_combinations += 108
+            if lr_selected:
+                total_time += 40
+                total_combinations += 40
+            if rf_selected:
+                total_time += 72
+                total_combinations += 216
+            if gb_selected:
+                total_time += 81
+                total_combinations += 81
+            if xgb_selected:
+                total_time += 243
+                total_combinations += 243
+            if cat_selected:
+                total_time += 108
+                total_combinations += 108
 
-        # Build selected models list
-        selected_models = []
-        if lr_selected:
-            selected_models.append("Logistic Regression")
-        if rf_selected:
-            selected_models.append("Random Forest")
-        if gb_selected:
-            selected_models.append("Gradient Boosting")
-        if xgb_selected:
-            selected_models.append("XGBoost")
-        if cat_selected:
-            selected_models.append("CatBoost")
+            # Build selected models list
+            selected_models = []
+            if lr_selected:
+                selected_models.append("Logistic Regression")
+            if rf_selected:
+                selected_models.append("Random Forest")
+            if gb_selected:
+                selected_models.append("Gradient Boosting")
+            if xgb_selected:
+                selected_models.append("XGBoost")
+            if cat_selected:
+                selected_models.append("CatBoost")
 
-        if not selected_models:
-            # No models selected - return an error tuple matching outputs
-            yield (gr.DataFrame(), "Error: No models selected", None, None, "Status: No models selected", "Estimated Time: 0s")
-            return
+            if not selected_models:
+                # No models selected - return an error tuple matching outputs
+                yield (gr.DataFrame(), "Error: No models selected", None, None, "Status: No models selected", "Estimated Time: 0s")
+                return
 
-        status_update = f"Status: Starting training for {len(selected_models)} models: {', '.join(selected_models)}"
-        time_update = f"Estimated Time: {total_time//60}m {total_time%60}s | Combinations: {total_combinations:,}"
+            status_update = f"Status: Starting training for {len(selected_models)} models: {', '.join(selected_models)}"
+            time_update = f"Estimated Time: {total_time//60}m {total_time%60}s | Combinations: {total_combinations:,}"
 
-        # Determine fast mode from UI
-        fast_mode = (mode == "Fast")
+            # Determine fast mode from UI
+            fast_mode = (mode == "Fast")
 
-        # First quick status update
-        yield (gr.DataFrame(), "Starting... preparing data and environment", None, None, f"Status: Preparing - fast={fast_mode}", time_update)
+            # First quick status update
+            yield (gr.DataFrame(), "Starting... preparing data and environment", None, None, f"Status: Preparing - fast={fast_mode}", time_update)
 
-        # Start training with ONLY selected models (high-level wrapper)
-        result = train_selected_models_only(selected_models, allow_install=True, fast=fast_mode, uploaded_file=uploaded_file)
-        if result.get("success"):
-            # Store for SHAP computation
-            demo.trained_result = result
+            # Start training with ONLY selected models (high-level wrapper)
+            result = train_selected_models_only(selected_models, allow_install=True, fast=fast_mode, uploaded_file=uploaded_file)
+            if result.get("success"):
+                # Store for SHAP computation
+                demo.trained_result = result
 
-            # Format best model summary
-            best_row = result["scorecard"].iloc[0]
-            best_summary = f"""
+                # Format best model summary
+                best_row = result["scorecard"].iloc[0]
+                best_summary = f"""
 ### Best Model: {best_row['Model']}
 
 Test Performance:
@@ -1734,65 +1735,65 @@ Cross-Validation:
 - CV AUC: {best_row['CV AUC Mean']:.3f} ± {best_row['CV AUC Std']:.3f}
 """
 
-            yield (result["scorecard"], best_summary, result.get("roc_path"), result.get("conf_path"), "Status: Training completed successfully! ✅", time_update)
-            return
-        else:
-            err = result.get('error', 'Unknown error')
-            yield (gr.DataFrame(), f"Error: {err}", None, None, f"Status: Training failed ❌ - {err}", "Estimated Time: Error occurred")
-            return
+                yield (result["scorecard"], best_summary, result.get("roc_path"), result.get("conf_path"), "Status: Training completed successfully! ✅", time_update)
+                return
+            else:
+                err = result.get('error', 'Unknown error')
+                yield (gr.DataFrame(), f"Error: {err}", None, None, f"Status: Training failed ❌ - {err}", "Estimated Time: Error occurred")
+                return
 
-    def test_ui():
-        """Test function to verify UI is working."""
-        return "UI is working! Status updated successfully.", "Test completed"
+        def test_ui():
+            """Test function to verify UI is working."""
+            return "UI is working! Status updated successfully.", "Test completed"
 
-    def compute_shap():
-        if hasattr(demo, 'trained_result'):
-            result = demo.trained_result
-            shap_paths = compute_shap_images(
-                result["trained"][result["best_name"]],
-                result["preprocessor"],
-                result["X_sample"],
-                result["feature_names"]
-            )
+        def compute_shap():
+            if hasattr(demo, 'trained_result'):
+                result = demo.trained_result
+                shap_paths = compute_shap_images(
+                    result["trained"][result["best_name"]],
+                    result["preprocessor"],
+                    result["X_sample"],
+                    result["feature_names"]
+                )
 
-            if len(shap_paths) >= 2:
-                return shap_paths[0], shap_paths[1]
+                if len(shap_paths) >= 2:
+                    return shap_paths[0], shap_paths[1]
+                else:
+                    return None, None
             else:
                 return None, None
-        else:
-            return None, None
 
-    def preview_dataset(uploaded_file=None):
-        try:
-            if uploaded_file:
-                path = uploaded_file.name if hasattr(uploaded_file, 'name') else uploaded_file
-                df = pd.read_csv(path)
-            else:
-                df = pd.read_csv(TELCO_CSV)
-            # show first 50 rows
-            return gr.DataFrame.update(value=df.head(50))
-        except Exception:
-            return gr.DataFrame.update(value=pd.DataFrame())
+        def preview_dataset(uploaded_file=None):
+            try:
+                if uploaded_file:
+                    path = uploaded_file.name if hasattr(uploaded_file, 'name') else uploaded_file
+                    df = pd.read_csv(path)
+                else:
+                    df = pd.read_csv(TELCO_CSV)
+                # show first 50 rows
+                return gr.DataFrame.update(value=df.head(50))
+            except Exception:
+                return gr.DataFrame.update(value=pd.DataFrame())
 
-    # Register event handlers at the Blocks scope (not nested inside preview_dataset)
-    preview_btn.click(fn=preview_dataset, inputs=[file_input], outputs=[dataset_preview])
+        # Register event handlers at the Blocks scope (must be inside the with-gr.Blocks context)
+        preview_btn.click(fn=preview_dataset, inputs=[file_input], outputs=[dataset_preview])
 
-    # Connect event handlers (registered inside Blocks context)
-    btn_train.click(
-        fn=train_models,
-        inputs=[cv_folds, ensemble_size, feature_selection, lr_checkbox, rf_checkbox, gb_checkbox, xgb_checkbox, cat_checkbox, mode_toggle, file_input],
-        outputs=[scorecard_output, best_model_output, roc_output, conf_output, status_text, time_estimate]
-    )
+        # Connect event handlers (registered inside Blocks context)
+        btn_train.click(
+            fn=train_models,
+            inputs=[cv_folds, ensemble_size, feature_selection, lr_checkbox, rf_checkbox, gb_checkbox, xgb_checkbox, cat_checkbox, mode_toggle, file_input],
+            outputs=[scorecard_output, best_model_output, roc_output, conf_output, status_text, time_estimate]
+        )
 
-    btn_test.click(
-        fn=test_ui,
-        outputs=[status_text, time_estimate]
-    )
+        btn_test.click(
+            fn=test_ui,
+            outputs=[status_text, time_estimate]
+        )
 
-    btn_shap.click(
-        fn=compute_shap,
-        outputs=[shap_summary, shap_bar]
-    )
+        btn_shap.click(
+            fn=compute_shap,
+            outputs=[shap_summary, shap_bar]
+        )
 
     print(f"[{datetime.now().strftime('%H:%M:%S')}] DEBUG: Exiting create_gradio_interface() and returning demo")
     return demo
